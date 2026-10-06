@@ -32,8 +32,8 @@ aircraft = [
         "y": 0.5,
         "heading": 270,
         "target_heading": 270,
-        "altitude": 15000,
-        "target_altitude": 15000,
+        "altitude": 10000,
+        "target_altitude": 10000,
         "ground_speed": 250,
         "target_speed": 250,
         "assigned_gate": "west",
@@ -54,6 +54,8 @@ GATES = {"north": 5000, "east": 10000, "south": 15000, "west": 20000}
 SPAWN_INTERVAL_SECONDS = 40
 score = 0
 streak = 0
+mission_completed = False
+mission_previous_x_gap = aircraft[0]["x"] - aircraft[1]["x"]
 next_spawn = 0
 next_callsign = 2
 simulation_task = None
@@ -79,7 +81,7 @@ def normalize_text(text: str) -> str:
 
 
 async def run_simulation():
-    global score, streak, next_spawn, next_callsign
+    global score, streak, next_spawn, next_callsign, mission_completed
     next_spawn = asyncio.get_running_loop().time() + SPAWN_INTERVAL_SECONDS
     while True:
         await asyncio.sleep(SIMULATION_TICK_SECONDS)
@@ -131,6 +133,22 @@ async def run_simulation():
             plane["x"] += distance_nm * math.sin(heading) / CANVAS_WIDTH_NM
             plane["y"] -= distance_nm * math.cos(heading) / CANVAS_WIDTH_NM
 
+        if not mission_completed:
+            indigo = next((p for p in aircraft if p["callsign"] == "Indigo 421"), None)
+            vistara = next((p for p in aircraft if p["callsign"] == "Vistara 60"), None)
+            if indigo and vistara:
+                x_gap = indigo["x"] - vistara["x"]
+                crossed_horizontally = mission_previous_x_gap < 0 <= x_gap
+                close_on_crossing = math.hypot(
+                    (indigo["x"] - vistara["x"]) * CANVAS_WIDTH_NM,
+                    (indigo["y"] - vistara["y"]) * CANVAS_WIDTH_NM,
+                ) <= HORIZONTAL_SEPARATION_NM
+                if (crossed_horizontally and close_on_crossing
+                        and abs(indigo["altitude"] - vistara["altitude"]) >= VERTICAL_SEPARATION_FT):
+                    score += 300
+                    mission_completed = True
+                mission_previous_x_gap = x_gap
+
         departed = []
         for plane in aircraft:
             if plane["x"] < 0 or plane["x"] > 1 or plane["y"] < 0 or plane["y"] > 1:
@@ -173,7 +191,6 @@ async def run_simulation():
                     first["conflict_with"].append(second["callsign"])
                     second["conflict_with"].append(first["callsign"])
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global simulation_task
@@ -192,13 +209,27 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/api/aircraft")
 async def get_aircraft():
-    return {"aircraft": aircraft, "score": score, "streak": streak, "gates": GATES}
+    return {"aircraft": aircraft, "score": score, "streak": streak, "gates": GATES,
+            "mission_completed": mission_completed}
 
 
 @app.post("/api/command")
 async def post_command(command: Command):
-    global aircraft, score, streak, next_callsign, next_spawn
+    global aircraft, score, streak, next_callsign, next_spawn, mission_completed, mission_previous_x_gap
     normalized = normalize_text(command.text)
+    camera_command = re.search(r"\bcamera\s+(top|side|reset)\b", normalized)
+    if camera_command:
+        view = camera_command.group(1)
+        return {
+            "normalized": normalized,
+            "applied": True,
+            "camera_view": view,
+            "feedback": {
+                "top": "Camera set to top-down view",
+                "side": "Camera set to eye-level view",
+                "reset": "Camera restored to isometric view",
+            }[view],
+        }
     if (re.search(r"\bvector\s+reset\b", normalized)
             or re.search(r"\b(?:reset|restart)\s+(?:the\s+)?simulation\b", normalized)):
         aircraft = [
@@ -212,13 +243,15 @@ async def post_command(command: Command):
             {
                 "callsign": "Vistara 60", "x": 0.99, "y": 0.5,
                 "heading": 270, "target_heading": 270,
-                "altitude": 15000, "target_altitude": 15000,
+                "altitude": 10000, "target_altitude": 10000,
                 "ground_speed": 250, "target_speed": 250,
                 "assigned_gate": "west", "in_conflict": False, "conflict_with": [],
             },
         ]
         score = 0
         streak = 0
+        mission_completed = False
+        mission_previous_x_gap = aircraft[0]["x"] - aircraft[1]["x"]
         next_callsign = 2
         next_spawn = asyncio.get_running_loop().time() + SPAWN_INTERVAL_SECONDS
         return {
@@ -303,7 +336,8 @@ async def index():
         * { box-sizing: border-box; }
         html, body { margin: 0; width: 100%; height: 100%; background: #050b08; overflow: hidden; }
         :root { --panel-width: 280px; --phosphor: #8cffb0; }
-        canvas { position: fixed; inset: 0 var(--panel-width) 0 0; width: calc(100% - var(--panel-width)); height: 100%; border: 1px solid #315f40; background: radial-gradient(ellipse at center, #07150d 0%, #030a06 72%, #010402 100%); box-shadow: inset 0 0 70px 18px rgba(0, 0, 0, .82), inset 0 0 16px rgba(88, 255, 145, .1); }
+        #radar { position: fixed; inset: 0 var(--panel-width) 0 0; border: 1px solid #315f40; background: radial-gradient(ellipse at center, #07150d 0%, #030a06 72%, #010402 100%); box-shadow: inset 0 0 70px 18px rgba(0, 0, 0, .82), inset 0 0 16px rgba(88, 255, 145, .1); }
+        #radar canvas { display: block; width: 100%; height: 100%; }
         .label { position: fixed; top: 12px; left: 12px; color: var(--phosphor); font: 12px monospace; letter-spacing: .16em; text-shadow: 0 0 8px rgba(100, 255, 150, .55); }
         .score { position: fixed; top: 12px; right: calc(var(--panel-width) + 12px); color: var(--phosphor); font: 14px monospace; text-shadow: 0 0 8px rgba(100, 255, 150, .4); }
         .celebration { position: fixed; z-index: 2; left: calc((100% - var(--panel-width)) / 2); top: 50%; color: #00ff66; font: bold 25px monospace; text-shadow: 0 0 8px #00ff66, 0 0 22px #00ff66; pointer-events: none; transform: translate(-50%, -50%); animation: score-float 1.25s ease-out forwards; }
@@ -311,8 +345,13 @@ async def index():
         .command-guide { position: fixed; left: 12px; bottom: 68px; padding: 9px 11px; border: 1px solid rgba(114, 255, 157, .4); background: rgba(3, 14, 8, .88); color: #9fe8b2; font: 10px/1.5 monospace; text-shadow: 0 0 6px rgba(100, 255, 150, .25); pointer-events: none; }
         .command-guide strong { display: block; margin-bottom: 3px; color: var(--phosphor); font-weight: normal; letter-spacing: .1em; }
         .warning { display: none; position: fixed; z-index: 1; top: 12px; left: 50%; transform: translateX(-50%); padding: 8px 12px; border: 1px solid #ff5555; background: rgba(25, 5, 5, .92); color: #ff7777; font: bold 14px monospace; box-shadow: 0 0 16px rgba(255, 40, 40, .2); }
+        .mission { position: fixed; z-index: 2; top: 42px; left: 12px; max-width: min(460px, calc(100% - var(--panel-width) - 24px)); padding: 9px 12px; border: 1px solid #40dfff; background: rgba(3, 14, 24, .9); color: #a8f4ff; font: 11px/1.45 monospace; box-shadow: 0 0 15px #00c8ff35; }
+        .mission strong { display: block; color: #57e7ff; letter-spacing: .1em; }
         .command-dock { position: fixed; z-index: 1; left: 12px; right: calc(var(--panel-width) + 12px); bottom: 12px; display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 12px; border: 1px solid rgba(114, 255, 157, .55); border-radius: 3px; background: rgba(3, 14, 8, .94); box-shadow: 0 0 12px rgba(63, 255, 117, .12), inset 0 0 12px rgba(63, 255, 117, .05); }
         .voice-ready { flex: 0 0 auto; color: #78c990; font: 10px monospace; letter-spacing: .08em; white-space: nowrap; }
+        .voice-toggle { flex: 0 0 auto; padding: 6px 9px; border: 1px solid #3b7650; border-radius: 2px; background: #0a1b10; color: var(--phosphor); font: 10px monospace; letter-spacing: .06em; cursor: pointer; }
+        .voice-toggle:hover, .voice-toggle[aria-pressed="true"] { border-color: #8cffb0; background: #153522; box-shadow: 0 0 12px rgba(63, 255, 117, .25); }
+        .voice-toggle[aria-pressed="true"] { color: #fff; }
         .voice-caret { display: inline-block; margin-right: 6px; color: #9bffb7; animation: caret-pulse 1.2s steps(2, start) infinite; text-shadow: 0 0 8px #65ff91; }
         @keyframes caret-pulse { to { visibility: hidden; } }
         .command { flex: 1; min-width: 0; padding: 10px 0; border: 0; background: transparent; color: var(--phosphor); font: 13px monospace; outline: none; }
@@ -341,10 +380,11 @@ async def index():
     </style>
 </head>
 <body>
-    <canvas aria-label="Aircraft positions"></canvas>
+    <div id="radar" role="img" aria-label="Interactive three-dimensional tactical radar volume"></div>
     <div class="label">VECTOR</div>
     <button class="help-button" type="button" aria-label="Reopen controller briefing">[?] BRIEFING</button>
     <div class="score">SCORE: 0 · STREAK: 0 · BEST: 0</div>
+    <div class="mission"><strong>ACTIVE MISSION // ONE: SCISSOR CROSSING</strong>Separate Indigo 421 and Vistara 60 vertically while maintaining forward headings — earn +300 points.</div>
     <div class="warning" role="alert">⚠ SEPARATION CONFLICT</div>
     <div class="command-guide" aria-label="Command examples">
         <strong>COMMAND GUIDE</strong>
@@ -359,7 +399,8 @@ async def index():
         <ol class="history-list"></ol>
     </aside>
     <div class="command-dock">
-        <span class="voice-ready"><span class="voice-caret" aria-hidden="true">▍</span>READY FOR VOICE CLEARANCE</span>
+        <span class="voice-ready" role="status" aria-live="polite"><span class="voice-caret" aria-hidden="true">▍</span>VOICE STANDBY</span>
+        <button class="voice-toggle" type="button" aria-pressed="false">🎙 START VOICE</button>
         <input class="command" type="text" aria-label="Command" placeholder="Enter voice command...">
     </div>
     <div class="briefing-overlay" role="presentation">
@@ -385,14 +426,195 @@ async def index():
                     <li>Vector reset: <code>“VECTOR reset”</code></li>
                 </ul>
             </section>
+            <section>
+                <h2>04 // PROFESSIONAL CONTROLLER SECRETS</h2>
+                <ul>
+                    <li>Altitude separates planes five times faster than turns.</li>
+                    <li>Flight levels avoid preposition speech errors.</li>
+                    <li>Orbit the camera in 3D to verify vertical clearance.</li>
+                    <li>Say callsign followed by gate name to automatically lock gate heading and altitude.</li>
+                </ul>
+            </section>
             <button class="briefing-button" type="button">ACKNOWLEDGE AND BEGIN</button>
         </article>
     </div>
-    <script>
-        const canvas = document.querySelector("canvas");
-        const context = canvas.getContext("2d");
+    <script type="importmap">
+        {"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}
+    </script>
+    <script type="module">
+        import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+        import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js";
+        const radar = document.querySelector("#radar");
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setSize(radar.clientWidth, radar.clientHeight);
+        renderer.setClearColor(0x030a06, 1);
+        radar.append(renderer.domElement);
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x030a06, 0.006);
+        const camera = new THREE.PerspectiveCamera(48, radar.clientWidth / radar.clientHeight, 0.1, 250);
+        camera.position.set(49, 42, 58);
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 10, 0);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.06;
+        controls.minDistance = 24;
+        controls.maxDistance = 120;
+        let cameraAnimationFrame = null;
+        function animateCamera(view) {
+            const destinations = {
+                top: new THREE.Vector3(0, 88, 0.01),
+                side: new THREE.Vector3(0, 12, 88),
+                reset: new THREE.Vector3(49, 42, 58),
+            };
+            const destination = destinations[view];
+            if (!destination) return;
+            if (cameraAnimationFrame !== null) cancelAnimationFrame(cameraAnimationFrame);
+            const startPosition = camera.position.clone();
+            const startTarget = controls.target.clone();
+            const endTarget = new THREE.Vector3(0, 10, 0);
+            const startedAt = performance.now();
+            controls.enabled = false;
+            const step = now => {
+                const progress = Math.min((now - startedAt) / 1100, 1);
+                const eased = progress * progress * (3 - 2 * progress);
+                camera.position.lerpVectors(startPosition, destination, eased);
+                controls.target.lerpVectors(startTarget, endTarget, eased);
+                camera.lookAt(controls.target);
+                if (progress < 1) cameraAnimationFrame = requestAnimationFrame(step);
+                else {
+                    cameraAnimationFrame = null;
+                    controls.enabled = true;
+                }
+            };
+            cameraAnimationFrame = requestAnimationFrame(step);
+        }
+        scene.add(new THREE.AmbientLight(0x8bdca2, 1.5));
+        const keyLight = new THREE.PointLight(0x55ff99, 50, 100);
+        keyLight.position.set(0, 30, 0);
+        scene.add(keyLight);
+        const movingLight = new THREE.PointLight(0x70ffd0, 95, 42, 1.7);
+        movingLight.position.set(-22, 14, -18);
+        scene.add(movingLight);
+        const movingLightMarker = new THREE.Mesh(
+            new THREE.SphereGeometry(.38, 12, 10),
+            new THREE.MeshBasicMaterial({ color: 0x9bffe0 })
+        );
+        scene.add(movingLightMarker);
+        const dynamicLayer = new THREE.Group();
+        scene.add(dynamicLayer);
+        function line(points, color, opacity = 1) {
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const material = new THREE.LineBasicMaterial({ color, transparent: opacity < 1, opacity });
+            return new THREE.Line(geometry, material);
+        }
+        function buildRadarVolume() {
+            const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60),
+                new THREE.MeshBasicMaterial({ color: 0x06120b, side: THREE.DoubleSide }));
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.y = -0.04;
+            scene.add(ground);
+            const grid = new THREE.GridHelper(60, 60, 0x277344, 0x153b25);
+            grid.position.y = 0;
+            scene.add(grid);
+            const volume = new THREE.Mesh(
+                new THREE.BoxGeometry(60, 24, 60),
+                new THREE.MeshBasicMaterial({ color: 0x38c978, wireframe: true, transparent: true, opacity: .035 })
+            );
+            volume.position.y = 12;
+            scene.add(volume);
+            scene.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(60, 24, 60)),
+                new THREE.LineBasicMaterial({ color: 0x38c978, transparent: true, opacity: .55 })));
+            for (const [altitude, label] of [[5, "FL050"], [10, "FL100"], [15, "FL150"], [20, "FL200"]]) {
+                const plane = new THREE.PlaneGeometry(60, 60);
+                const mesh = new THREE.Mesh(plane, new THREE.MeshBasicMaterial({ color: 0x45d889, wireframe: true, transparent: true, opacity: .09, side: THREE.DoubleSide }));
+                mesh.rotation.x = -Math.PI / 2;
+                mesh.position.y = altitude;
+                scene.add(mesh);
+                const tick = line([new THREE.Vector3(-30, altitude, -30), new THREE.Vector3(30, altitude, -30)], 0x55e997, .65);
+                scene.add(tick);
+                addText(label, -29, altitude + .15, -30, "#8cffb0");
+            }
+            const gateFrameMaterial = new THREE.MeshStandardMaterial({
+                color: 0x39d9e8, emissive: 0x087c88, emissiveIntensity: 1.4,
+                metalness: .35, roughness: .3
+            });
+            const gateLightMaterial = new THREE.MeshBasicMaterial({ color: 0x9cffff });
+            for (const [name, altitude, x, z, rotation] of [
+                ["NORTH", 5, 0, -29.45, 0], ["EAST", 10, 29.45, 0, Math.PI / 2],
+                ["SOUTH", 15, 0, 29.45, 0], ["WEST", 20, -29.45, 0, Math.PI / 2]
+            ]) {
+                const gate = new THREE.Group();
+                gate.position.set(x, altitude, z);
+                gate.rotation.y = rotation;
+                for (const side of [-1, 1]) {
+                    const post = new THREE.Mesh(new THREE.BoxGeometry(.34, 4.8, .42), gateFrameMaterial);
+                    post.position.set(side * 4, 0, 0);
+                    gate.add(post);
+                    const footing = new THREE.Mesh(new THREE.BoxGeometry(1.05, .22, .9), gateFrameMaterial);
+                    footing.position.set(side * 4, -2.42, 0);
+                    gate.add(footing);
+                    const beacon = new THREE.Mesh(new THREE.SphereGeometry(.23, 10, 8), gateLightMaterial);
+                    beacon.position.set(side * 4, 2.5, 0);
+                    gate.add(beacon);
+                }
+                const lintel = new THREE.Mesh(new THREE.BoxGeometry(8.35, .3, .42), gateFrameMaterial);
+                lintel.position.y = 2.4;
+                gate.add(lintel);
+                const threshold = new THREE.Mesh(new THREE.BoxGeometry(7.7, .08, .7), gateLightMaterial);
+                threshold.position.y = -2.45;
+                gate.add(threshold);
+                scene.add(gate);
+
+                const approach = new THREE.Group();
+                approach.position.set(x, .07, z);
+                approach.rotation.y = rotation;
+                const centerline = line([
+                    new THREE.Vector3(0, 0, -18), new THREE.Vector3(0, 0, -4.5)
+                ], 0x48eaff, .6);
+                approach.add(centerline);
+                for (let distance = 6; distance <= 18; distance += 4) {
+                    for (const side of [-1, 1]) {
+                        const marker = new THREE.Mesh(new THREE.BoxGeometry(.24, .08, .8), gateLightMaterial);
+                        marker.position.set(side * 1.6, 0, -distance);
+                        approach.add(marker);
+                    }
+                }
+                scene.add(approach);
+                addText(`GATE ${name} · ${altitude * 1000} FT`, x, altitude + 3.4, z, "#6befff");
+            }
+        }
+        function addText(text, x, y, z, color) {
+            const canvas = document.createElement("canvas");
+            canvas.width = 512; canvas.height = 64;
+            const ctx = canvas.getContext("2d");
+            ctx.font = "bold 28px monospace"; ctx.fillStyle = color; ctx.textAlign = "center";
+            ctx.shadowColor = color; ctx.shadowBlur = 12; ctx.fillText(text, 256, 42);
+            const texture = new THREE.CanvasTexture(canvas);
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }));
+            sprite.position.set(x, y, z); sprite.scale.set(9, 1.125, 1); scene.add(sprite);
+        }
+        buildRadarVolume();
+        function animate(now = 0) {
+            requestAnimationFrame(animate);
+            const time = now * .00035;
+            movingLight.position.set(Math.cos(time) * 23, 13 + Math.sin(time * 1.7) * 5,
+                Math.sin(time * .72) * 23);
+            movingLightMarker.position.copy(movingLight.position);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+        window.addEventListener("resize", () => {
+            const width = radar.clientWidth;
+            const height = radar.clientHeight;
+            camera.aspect = width / Math.max(height, 1);
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+        });
         const commandInput = document.querySelector(".command");
         const voiceStatus = document.querySelector(".voice-ready");
+        const voiceToggle = document.querySelector(".voice-toggle");
         const warningBanner = document.querySelector(".warning");
         const scoreDisplay = document.querySelector(".score");
         const historyList = document.querySelector(".history-list");
@@ -401,10 +623,15 @@ async def index():
         const helpButton = document.querySelector(".help-button");
         let aircraft = [];
         let gates = {};
+        let missionComplete = false;
         let selectedCallsign = null;
         let bearingCursor = null;
         const trails = new Map();
         const commandHistory = [];
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition = null;
+        let voiceActive = false;
+        let voiceSubmitTimer = null;
         let audioContext = null;
         let lastConflictPing = 0;
         let previousScore = null;
@@ -436,6 +663,63 @@ async def index():
 
         briefingButton.addEventListener("click", acknowledgeBriefing);
         helpButton.addEventListener("click", openBriefing);
+
+        function updateVoiceBeacon(message, active = voiceActive) {
+            voiceStatus.lastChild.textContent = message || (active ? "LISTENING FOR CLEARANCE" : "VOICE STANDBY");
+            voiceToggle.setAttribute("aria-pressed", String(active));
+            voiceToggle.textContent = active ? "■ STOP VOICE" : "🎙 START VOICE";
+        }
+
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.lang = "en-US";
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.onstart = () => { voiceActive = true; updateVoiceBeacon(); };
+            recognition.onresult = event => {
+                let transcript = "";
+                let hasFinal = false;
+                for (let index = event.resultIndex; index < event.results.length; index++) {
+                    transcript += event.results[index][0].transcript;
+                    hasFinal ||= event.results[index].isFinal;
+                }
+                if (transcript.trim()) commandInput.value = transcript.trim();
+                if (hasFinal) {
+                    clearTimeout(voiceSubmitTimer);
+                    voiceSubmitTimer = setTimeout(() => {
+                        if (commandInput.value.trim()) submitCommand();
+                    }, 700);
+                }
+            };
+            recognition.onerror = event => {
+                if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+                    voiceActive = false;
+                    updateVoiceBeacon("MICROPHONE ACCESS DENIED", false);
+                } else if (event.error !== "aborted" && event.error !== "no-speech") {
+                    updateVoiceBeacon("VOICE INPUT ERROR", false);
+                }
+            };
+            recognition.onend = () => {
+                voiceActive = false;
+                updateVoiceBeacon();
+            };
+            voiceToggle.addEventListener("click", () => {
+                if (voiceActive) {
+                    recognition.stop();
+                    return;
+                }
+                try {
+                    recognition.start();
+                    updateVoiceBeacon("REQUESTING MICROPHONE", true);
+                } catch (error) {
+                    updateVoiceBeacon("VOICE INPUT UNAVAILABLE", false);
+                }
+            });
+        } else {
+            voiceToggle.disabled = true;
+            voiceToggle.textContent = "VOICE UNSUPPORTED";
+            updateVoiceBeacon("USE TEXT COMMAND", false);
+        }
 
         function playConflictPing() {
             if (!audioContext || audioContext.state !== "running") return;
@@ -483,281 +767,85 @@ async def index():
         }
 
         function drawAircraft() {
-            const width = window.innerWidth - 280;
-            const height = window.innerHeight;
-            const ratio = window.devicePixelRatio || 1;
-            
-            if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
-                canvas.width = Math.round(width * ratio);
-                canvas.height = Math.round(height * ratio);
+            while (dynamicLayer.children.length) {
+                const object = dynamicLayer.children.pop();
+                object.parent = null;
+                object.traverse(child => {
+                    child.geometry?.dispose();
+                    if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+                    else child.material?.dispose();
+                });
             }
-            context.setTransform(ratio, 0, 0, ratio, 0, 0);
-            context.clearRect(0, 0, width, height);
-
-            context.fillStyle = "#00ff66";
-            context.strokeStyle = "#00ff66";
-            context.font = "12px monospace";
-
-            const centerX = width / 2;
-            const centerY = height / 2;
-            const pixelsPerNm = width / 60;
-            context.strokeStyle = "rgba(0, 255, 102, 0.22)";
-            context.fillStyle = "rgba(0, 255, 102, 0.65)";
-            context.shadowColor = "rgba(0, 255, 102, 0.85)";
-            context.shadowBlur = 8;
-            context.textAlign = "left";
-            for (const rangeNm of [15, 30, 45]) {
-                context.beginPath();
-                context.arc(centerX, centerY, rangeNm * pixelsPerNm, 0, Math.PI * 2);
-                context.stroke();
-                context.fillText(`${rangeNm} NM`, centerX + 5, centerY - rangeNm * pixelsPerNm + 14);
-            }
-            context.shadowBlur = 0;
-
-            if (bearingCursor) {
-                const angle = Math.atan2(bearingCursor.x - centerX, centerY - bearingCursor.y);
-                context.save();
-                context.strokeStyle = "#ffb347";
-                context.fillStyle = "#ffcf70";
-                context.shadowColor = "#ff9d24";
-                context.shadowBlur = 9;
-                context.lineWidth = 1.5;
-                context.beginPath();
-                context.moveTo(centerX, centerY);
-                context.lineTo(bearingCursor.x, bearingCursor.y);
-                context.stroke();
-                const bearing = (Math.round((angle * 180 / Math.PI + 360) % 360) + 360) % 360;
-                context.textAlign = "left";
-                context.font = "11px monospace";
-                context.fillText(`${String(bearing).padStart(3, "0")}°`, bearingCursor.x + 8, bearingCursor.y - 8);
-                context.restore();
-            }
-
-            // Bearing ticks and labels around the outer 45 NM range ring.
-            const compassRadius = 45 * pixelsPerNm;
-            context.save();
-            context.strokeStyle = "rgba(120, 255, 160, 0.38)";
-            context.fillStyle = "rgba(150, 255, 180, 0.72)";
-            context.lineWidth = 1;
-            context.font = "9px monospace";
-            context.textAlign = "center";
-            context.textBaseline = "middle";
-            for (let bearing = 0; bearing < 360; bearing += 10) {
-                const angle = bearing * Math.PI / 180;
-                const major = bearing % 30 === 0;
-                const innerRadius = compassRadius - (major ? 10 : 5);
-                context.beginPath();
-                context.moveTo(centerX + Math.sin(angle) * innerRadius,
-                    centerY - Math.cos(angle) * innerRadius);
-                context.lineTo(centerX + Math.sin(angle) * compassRadius,
-                    centerY - Math.cos(angle) * compassRadius);
-                context.stroke();
-                if (major) {
-                    const labelRadius = compassRadius + 12;
-                    context.fillText(String(bearing).padStart(3, "0"),
-                        centerX + Math.sin(angle) * labelRadius,
-                        centerY - Math.cos(angle) * labelRadius);
-                }
-            }
-            context.setLineDash([2, 7]);
-            context.strokeStyle = "rgba(100, 220, 135, 0.16)";
-            context.beginPath();
-            context.moveTo(centerX - compassRadius, centerY);
-            context.lineTo(centerX + compassRadius, centerY);
-            context.moveTo(centerX, centerY - compassRadius);
-            context.lineTo(centerX, centerY + compassRadius);
-            context.stroke();
-            context.setLineDash([]);
-            context.restore();
-
-            context.fillStyle = "#00ff66";
-            context.textAlign = "center";
-            context.fillText("GATE NORTH · 5,000 FT", centerX, 20);
-            context.fillText("GATE SOUTH · 15,000 FT", centerX, height - 10);
-            context.save();
-            context.translate(16, centerY);
-            context.rotate(-Math.PI / 2);
-            context.fillText("GATE WEST · 20,000 FT", 0, 0);
-            context.restore();
-            context.save();
-            context.translate(width - 16, centerY);
-            context.rotate(Math.PI / 2);
-            context.fillText("GATE EAST · 10,000 FT", 0, 0);
-            context.restore();
-            context.textAlign = "left";
-
-            const sweepAngle = (Date.now() % 4000) / 4000 * Math.PI * 2;
-            const sweepRadius = Math.hypot(width, height);
-            const sweepCanvasAngle = sweepAngle - Math.PI / 2;
-            const coneGradient = context.createRadialGradient(
-                centerX, centerY, 0, centerX, centerY, sweepRadius
-            );
-            coneGradient.addColorStop(0, "rgba(0, 255, 102, 0.2)");
-            coneGradient.addColorStop(1, "rgba(0, 255, 102, 0.015)");
-            context.fillStyle = coneGradient;
-            context.beginPath();
-            context.moveTo(centerX, centerY);
-            context.arc(centerX, centerY, sweepRadius,
-                sweepCanvasAngle - Math.PI / 12, sweepCanvasAngle);
-            context.closePath();
-            context.fill();
-            context.strokeStyle = "rgba(0, 255, 102, 0.65)";
-            context.shadowColor = "#00ff66";
-            context.shadowBlur = 10;
-            context.beginPath();
-            context.moveTo(centerX, centerY);
-            context.lineTo(centerX + Math.sin(sweepAngle) * sweepRadius,
-                centerY - Math.cos(sweepAngle) * sweepRadius);
-            context.stroke();
-            context.shadowBlur = 0;
-            context.strokeStyle = "#00ff66";
-
-            for (const [callsign, positions] of trails) {
-                for (let index = 0; index < positions.length; index++) {
-                    const point = positions[index];
-                    context.globalAlpha = (index + 1) / positions.length * 0.45;
-                    context.shadowColor = "#00ff66";
-                    context.shadowBlur = 9;
-                    context.fillRect(point.x * width - 2, point.y * height - 2, 4, 4);
-                }
-            }
-            context.globalAlpha = 1;
-            context.shadowBlur = 0;
-
-            const planesByCallsign = new Map(aircraft.map(plane => [plane.callsign, plane]));
-            const conflictLines = new Set();
             let hasConflict = false;
             for (const plane of aircraft) {
-                if (!plane.in_conflict) continue;
-                hasConflict = true;
-                for (const otherCallsign of plane.conflict_with || []) {
-                    const key = [plane.callsign, otherCallsign].sort().join("|");
-                    if (conflictLines.has(key)) continue;
-                    conflictLines.add(key);
-                    const other = planesByCallsign.get(otherCallsign);
-                    if (!other) continue;
-                    context.strokeStyle = "#ff3333";
-                    context.beginPath();
-                    context.moveTo(plane.x * width, plane.y * height);
-                    context.lineTo(other.x * width, other.y * height);
-                    context.stroke();
+                const x = (plane.x - .5) * 60;
+                const z = (plane.y - .5) * 60;
+                const altitude = plane.altitude / 1000;
+                const conflict = plane.in_conflict;
+                hasConflict ||= conflict;
+                const color = conflict ? 0xff2929 : 0x49ff86;
+                const pulse = conflict && Math.floor(Date.now() / 300) % 2 === 0;
+                const group = new THREE.Group();
+                group.position.set(x, altitude, z);
+                const arrow = new THREE.Mesh(new THREE.ConeGeometry(.62, 2.1, 4), new THREE.MeshBasicMaterial({ color: pulse ? 0xff9999 : color }));
+                arrow.rotation.x = Math.PI / 2;
+                arrow.rotation.y = -plane.heading * Math.PI / 180;
+                group.add(arrow);
+                dynamicLayer.add(group);
+                const positions = trails.get(plane.callsign) || [];
+                if (positions.length > 1) {
+                    const trailPoints = positions.map(position => new THREE.Vector3(
+                        (position.x - .5) * 60, altitude + .08, (position.y - .5) * 60
+                    ));
+                    const trail = line(trailPoints, color, conflict ? .75 : .42);
+                    dynamicLayer.add(trail);
+                }
+                const headingRadians = plane.heading * Math.PI / 180;
+                const vectorEnd = new THREE.Vector3(
+                    x + Math.sin(headingRadians) * 4,
+                    altitude + .12,
+                    z - Math.cos(headingRadians) * 4
+                );
+                dynamicLayer.add(line([new THREE.Vector3(x, altitude + .12, z), vectorEnd], pulse ? 0xff5555 : 0x8cffb0, .8));
+                const drop = line([new THREE.Vector3(x, 0, z), new THREE.Vector3(x, altitude, z)], pulse ? 0xff2020 : 0x54eaff, .8);
+                dynamicLayer.add(drop);
+                const shadow = new THREE.Mesh(new THREE.CircleGeometry(.65, 20), new THREE.MeshBasicMaterial({ color: pulse ? 0xff2222 : 0x62eaff, transparent: true, opacity: .8, side: THREE.DoubleSide }));
+                shadow.rotation.x = -Math.PI / 2; shadow.position.set(x, .035, z); dynamicLayer.add(shadow);
+                const halo = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 1, 32, 1, true), new THREE.MeshBasicMaterial({ color: pulse ? 0xff2222 : 0x55dfff, wireframe: true, transparent: true, opacity: conflict ? .9 : .28 }));
+                halo.position.set(x, altitude, z); dynamicLayer.add(halo);
+                addDynamicLabel(plane, x, altitude + 1.5, z, pulse ? "#ff7777" : "#9dffc0");
+                if (plane.callsign === selectedCallsign) {
+                    const selection = new THREE.Mesh(new THREE.SphereGeometry(.9, 16, 12), new THREE.MeshBasicMaterial({ color: 0x54eaff, wireframe: true }));
+                    selection.position.set(x, altitude, z); dynamicLayer.add(selection);
                 }
             }
             warningBanner.style.display = hasConflict ? "block" : "none";
             if (hasConflict) playConflictPing();
-
-            for (const plane of aircraft) {
-                const x = plane.x * width;
-                const y = plane.y * height;
-                const safetyRadius = 3 * pixelsPerNm;
-                context.save();
-                context.beginPath();
-                context.arc(x, y, safetyRadius, 0, Math.PI * 2);
-                context.setLineDash([4, 4]);
-                context.strokeStyle = plane.in_conflict ? "rgba(255, 55, 55, .8)" : "rgba(100, 220, 255, .35)";
-                context.lineWidth = 1;
-                context.stroke();
-                context.setLineDash([]);
-                context.restore();
-
-                if (plane.callsign === selectedCallsign) {
-                    const gatePoints = {
-                        north: [x, 0], east: [width, y],
-                        south: [x, height], west: [0, y],
-                    };
-                    const [gateX, gateY] = gatePoints[plane.assigned_gate] || [x, y];
-                    context.save();
-                    context.strokeStyle = "#65f6ff";
-                    context.shadowColor = "#00eaff";
-                    context.shadowBlur = 12;
-                    context.setLineDash([7, 6]);
-                    context.beginPath();
-                    context.moveTo(x, y);
-                    context.lineTo(gateX, gateY);
-                    context.stroke();
-                    context.setLineDash([]);
-                    context.beginPath();
-                    context.arc(x, y, 11, 0, Math.PI * 2);
-                    context.lineWidth = 2;
-                    context.stroke();
-                    context.restore();
-                }
-                const heading = plane.heading * Math.PI / 180;
-                const distancePixels = (plane.ground_speed / 60) * (width / 60);
-                const conflicting = plane.in_conflict;
-                const pulseOn = Math.floor(Date.now() / 400) % 2 === 0;
-                const targetColor = conflicting
-                    ? (pulseOn ? "#ff3333" : "#ff8888")
-                    : "#00ff66";
-                context.strokeStyle = targetColor;
-                context.fillStyle = targetColor;
-                context.shadowColor = conflicting ? "#ff2222" : "#00ff66";
-                context.shadowBlur = conflicting && !pulseOn ? 8 : 12;
-
-                // Velocity vector line
-                context.beginPath();
-                context.moveTo(x, y);
-                context.lineTo(
-                    x + Math.sin(heading) * distancePixels,
-                    y - Math.cos(heading) * distancePixels
-                );
-                context.stroke();
-
-                // ATC diamond target and offset data tag
-                context.beginPath();
-                context.moveTo(x, y - 5);
-                context.lineTo(x + 5, y);
-                context.lineTo(x, y + 5);
-                context.lineTo(x - 5, y);
-                context.closePath();
-                context.stroke();
-                const altitudeArrow = plane.altitude < plane.target_altitude
-                    ? "↑"
-                    : plane.altitude > plane.target_altitude ? "↓" : "";
-                const gateCode = plane.assigned_gate[0].toUpperCase();
-                const gateAltitude = gates[plane.assigned_gate];
-                const gateAltitudeCode = Number.isFinite(gateAltitude) ? `${gateAltitude / 1000}K` : "—";
-                const tag = `${plane.callsign} ${altitudeArrow}${plane.altitude} FT ${plane.ground_speed} KT [gate ${gateCode} ${gateAltitudeCode}]`;
-                const side = x > width - 230 ? -1 : 1;
-                context.textAlign = side > 0 ? "left" : "right";
-                context.beginPath();
-                context.moveTo(x + side * 4, y - 3);
-                context.lineTo(x + side * 9, y - 9);
-                context.stroke();
-                context.fillText(
-                    tag,
-                    x + side * 12,
-                    y - 6
-                );
-                context.shadowBlur = 0;
-            }
-            context.textAlign = "left";
         }
 
-        canvas.addEventListener("pointermove", (event) => {
-            const rect = canvas.getBoundingClientRect();
-            bearingCursor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-            drawAircraft();
-        });
-
-        canvas.addEventListener("pointerleave", () => {
-            bearingCursor = null;
-            drawAircraft();
-        });
-
-        canvas.addEventListener("click", (event) => {
-            const rect = canvas.getBoundingClientRect();
-            const width = rect.width;
-            const height = rect.height;
-            const x = event.clientX - rect.left;
-            const y = event.clientY - rect.top;
-            const plane = [...aircraft].reverse().find(item =>
-                Math.hypot(item.x * width - x, item.y * height - y) <= 14
-            );
-            if (!plane) return;
-            selectedCallsign = plane.callsign;
-            commandInput.value = `${plane.callsign} `;
-            commandInput.focus();
+        function addDynamicLabel(plane, x, y, z, color) {
+            const canvas = document.createElement("canvas"); canvas.width = 512; canvas.height = 64;
+            const ctx = canvas.getContext("2d"); ctx.font = "bold 26px monospace"; ctx.fillStyle = color;
+            ctx.shadowColor = color; ctx.shadowBlur = 10;
+            ctx.fillText(`${plane.callsign} · ${Math.round(plane.altitude)} FT · ${plane.ground_speed} KT`, 8, 42);
+            const texture = new THREE.CanvasTexture(canvas);
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }));
+            sprite.position.set(x + 2, y, z); sprite.scale.set(10, 1.25, 1); dynamicLayer.add(sprite);
+        }
+        const raycaster = new THREE.Raycaster();
+        const pointer = new THREE.Vector2();
+        radar.addEventListener("click", event => {
+            const rect = radar.getBoundingClientRect();
+            pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+            raycaster.setFromCamera(pointer, camera);
+            const picks = raycaster.intersectObjects(dynamicLayer.children, true);
+            const picked = picks.find(hit => hit.object.parent?.position && aircraft.some(p =>
+                Math.hypot((p.x - .5) * 60 - hit.object.parent.position.x, (p.y - .5) * 60 - hit.object.parent.position.z) < 2));
+            if (!picked) return;
+            const p = aircraft.find(item => Math.hypot((item.x - .5) * 60 - picked.object.parent.position.x, (item.y - .5) * 60 - picked.object.parent.position.z) < 2);
+            if (!p) return;
+            selectedCallsign = p.callsign;
+            commandInput.value = `${p.callsign} `; commandInput.focus();
             commandInput.setSelectionRange(commandInput.value.length, commandInput.value.length);
             drawAircraft();
         });
@@ -849,6 +937,7 @@ async def index():
             const text = commandInput.value.trim();
             if (!text) return;
             commandInput.value = "";
+            updateVoiceBeacon();
             try {
                 const response = await fetch("/api/command", {
                     method: "POST",
@@ -859,6 +948,7 @@ async def index():
                 const result = await response.json();
                 addCommandHistory(text, result.applied);
                 if (result.applied) {
+                    if (result.camera_view) animateCamera(result.camera_view);
                     if (result.reset) trails.clear();
                     speakPilotFeedback(result.feedback);
                     await refreshAircraft();
