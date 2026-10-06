@@ -267,15 +267,27 @@ async def post_command(command: Command):
         plane["target_heading"] = {"north": 0, "east": 90, "south": 180, "west": 270}[selected_gate]
         plane["target_altitude"] = GATES[selected_gate]
     applied = bool(heading or flight_level or altitude or speed or gate)
-    feedback_type = (
-        "heading" if heading else "altitude" if flight_level or altitude
-        else "speed" if speed else "gate" if gate else None
-    )
+    readback = []
+    digit_words = dict(enumerate((
+        "zero", "one", "two", "three", "four",
+        "five", "six", "seven", "eight", "niner",
+    )))
+
+    def spoken_digits(value, width=0):
+        return " ".join(digit_words[int(digit)] for digit in str(value).zfill(width))
+
+    if heading or gate:
+        readback.append(f"heading {spoken_digits(plane['target_heading'], 3)}")
+    if flight_level or altitude or gate:
+        readback.append(f"altitude {spoken_digits(plane['target_altitude'])}")
+    if speed:
+        readback.append(f"speed {spoken_digits(plane['target_speed'], 3)}")
+    feedback = f"{', '.join(readback)}, Roger, {plane['callsign']}" if applied else None
     return {
         "normalized": normalized,
         "applied": applied,
         "callsign": plane["callsign"],
-        "feedback": f"{feedback_type} Roger, {plane['callsign']}" if applied else None,
+        "feedback": feedback,
     }
 
 
