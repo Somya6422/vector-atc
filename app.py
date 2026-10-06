@@ -53,6 +53,7 @@ VERTICAL_SEPARATION_FT = 1000
 GATES = {"north": 5000, "east": 10000, "south": 15000, "west": 20000}
 SPAWN_INTERVAL_SECONDS = 40
 score = 0
+streak = 0
 next_spawn = 0
 next_callsign = 2
 simulation_task = None
@@ -78,7 +79,7 @@ def normalize_text(text: str) -> str:
 
 
 async def run_simulation():
-    global score, next_spawn, next_callsign
+    global score, streak, next_spawn, next_callsign
     next_spawn = asyncio.get_running_loop().time() + SPAWN_INTERVAL_SECONDS
     while True:
         await asyncio.sleep(SIMULATION_TICK_SECONDS)
@@ -144,8 +145,10 @@ async def run_simulation():
                 if (exit_gate == plane["assigned_gate"]
                         and abs(plane["altitude"] - GATES[exit_gate]) <= 500):
                     score += 1
+                    streak += 1
                 else:
                     score -= 1
+                    streak = 0
                 departed.append(plane)
         for plane in departed:
             aircraft.remove(plane)
@@ -189,14 +192,15 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/api/aircraft")
 async def get_aircraft():
-    return {"aircraft": aircraft, "score": score, "gates": GATES}
+    return {"aircraft": aircraft, "score": score, "streak": streak, "gates": GATES}
 
 
 @app.post("/api/command")
 async def post_command(command: Command):
-    global aircraft, score, next_callsign, next_spawn
+    global aircraft, score, streak, next_callsign, next_spawn
     normalized = normalize_text(command.text)
-    if re.search(r"\b(?:reset|restart)\s+(?:the\s+)?simulation\b", normalized):
+    if (re.search(r"\bvector\s+reset\b", normalized)
+            or re.search(r"\b(?:reset|restart)\s+(?:the\s+)?simulation\b", normalized)):
         aircraft = [
             {
                 "callsign": "Indigo 421", "x": 0.01, "y": 0.5,
@@ -214,6 +218,7 @@ async def post_command(command: Command):
             },
         ]
         score = 0
+        streak = 0
         next_callsign = 2
         next_spawn = asyncio.get_running_loop().time() + SPAWN_INTERVAL_SECONDS
         return {
@@ -286,6 +291,8 @@ async def index():
         canvas { position: fixed; inset: 0 var(--panel-width) 0 0; width: calc(100% - var(--panel-width)); height: 100%; border: 1px solid #315f40; background: radial-gradient(ellipse at center, #07150d 0%, #030a06 72%, #010402 100%); box-shadow: inset 0 0 70px 18px rgba(0, 0, 0, .82), inset 0 0 16px rgba(88, 255, 145, .1); }
         .label { position: fixed; top: 12px; left: 12px; color: var(--phosphor); font: 12px monospace; letter-spacing: .16em; text-shadow: 0 0 8px rgba(100, 255, 150, .55); }
         .score { position: fixed; top: 12px; right: calc(var(--panel-width) + 12px); color: var(--phosphor); font: 14px monospace; text-shadow: 0 0 8px rgba(100, 255, 150, .4); }
+        .command-guide { position: fixed; left: 12px; bottom: 68px; padding: 9px 11px; border: 1px solid rgba(114, 255, 157, .4); background: rgba(3, 14, 8, .88); color: #9fe8b2; font: 10px/1.5 monospace; text-shadow: 0 0 6px rgba(100, 255, 150, .25); pointer-events: none; }
+        .command-guide strong { display: block; margin-bottom: 3px; color: var(--phosphor); font-weight: normal; letter-spacing: .1em; }
         .warning { display: none; position: fixed; z-index: 1; top: 12px; left: 50%; transform: translateX(-50%); padding: 8px 12px; border: 1px solid #ff5555; background: rgba(25, 5, 5, .92); color: #ff7777; font: bold 14px monospace; box-shadow: 0 0 16px rgba(255, 40, 40, .2); }
         .command-dock { position: fixed; z-index: 1; left: 12px; right: calc(var(--panel-width) + 12px); bottom: 12px; display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 12px; border: 1px solid rgba(114, 255, 157, .55); border-radius: 3px; background: rgba(3, 14, 8, .94); box-shadow: 0 0 12px rgba(63, 255, 117, .12), inset 0 0 12px rgba(63, 255, 117, .05); }
         .voice-ready { flex: 0 0 auto; color: #78c990; font: 10px monospace; letter-spacing: .08em; white-space: nowrap; }
@@ -307,6 +314,14 @@ async def index():
     <div class="label">VECTOR</div>
     <div class="score">SCORE: 0</div>
     <div class="warning" role="alert">⚠ SEPARATION CONFLICT</div>
+    <div class="command-guide" aria-label="Command examples">
+        <strong>COMMAND GUIDE</strong>
+        Heading: Indigo 421 heading 090<br>
+        Flight level: Indigo 421 flight level 100<br>
+        Speed: Vistara 60 speed 250<br>
+        Gate: Vistara 60 west gate<br>
+        Reset: VECTOR reset
+    </div>
     <aside class="history" aria-label="Command history">
         <h2>COMMAND HISTORY</h2>
         <ol class="history-list"></ol>
@@ -659,7 +674,7 @@ async def index():
                     if (positions.length > 5) positions.shift();
                     trails.set(plane.callsign, positions);
                 }
-                scoreDisplay.textContent = `SCORE: ${state.score}`;
+                scoreDisplay.textContent = `SCORE: ${state.score} · STREAK: ${state.streak}`;
                 drawAircraft();
             } catch (error) {
                 console.error(error);
@@ -685,6 +700,33 @@ async def index():
             window.speechSynthesis.cancel();
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.rate = 1;
+            const squelch = () => {
+                if (!audioContext || audioContext.state !== "running") return;
+                const duration = 0.04;
+                const frameCount = Math.floor(audioContext.sampleRate * duration);
+                const buffer = audioContext.createBuffer(1, frameCount, audioContext.sampleRate);
+                const samples = buffer.getChannelData(0);
+                for (let i = 0; i < frameCount; i++) samples[i] = Math.random() * 2 - 1;
+                const source = audioContext.createBufferSource();
+                const filter = audioContext.createBiquadFilter();
+                const gain = audioContext.createGain();
+                const now = audioContext.currentTime;
+                source.buffer = buffer;
+                filter.type = "highpass";
+                filter.frequency.setValueAtTime(900, now);
+                gain.gain.setValueAtTime(0.0001, now);
+                gain.gain.exponentialRampToValueAtTime(0.16, now + 0.006);
+                gain.gain.setValueAtTime(0.16, now + 0.028);
+                gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+                source.connect(filter);
+                filter.connect(gain);
+                gain.connect(audioContext.destination);
+                source.start(now);
+                source.stop(now + duration);
+            };
+            squelch();
+            utterance.onend = squelch;
+            utterance.onerror = squelch;
             window.speechSynthesis.speak(utterance);
         }
 
