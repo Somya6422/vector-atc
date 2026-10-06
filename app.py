@@ -144,10 +144,10 @@ async def run_simulation():
                     exit_gate = "south"
                 if (exit_gate == plane["assigned_gate"]
                         and abs(plane["altitude"] - GATES[exit_gate]) <= 500):
-                    score += 1
+                    score += 100
                     streak += 1
                 else:
-                    score -= 1
+                    score -= 100
                     streak = 0
                 departed.append(plane)
         for plane in departed:
@@ -291,6 +291,8 @@ async def index():
         canvas { position: fixed; inset: 0 var(--panel-width) 0 0; width: calc(100% - var(--panel-width)); height: 100%; border: 1px solid #315f40; background: radial-gradient(ellipse at center, #07150d 0%, #030a06 72%, #010402 100%); box-shadow: inset 0 0 70px 18px rgba(0, 0, 0, .82), inset 0 0 16px rgba(88, 255, 145, .1); }
         .label { position: fixed; top: 12px; left: 12px; color: var(--phosphor); font: 12px monospace; letter-spacing: .16em; text-shadow: 0 0 8px rgba(100, 255, 150, .55); }
         .score { position: fixed; top: 12px; right: calc(var(--panel-width) + 12px); color: var(--phosphor); font: 14px monospace; text-shadow: 0 0 8px rgba(100, 255, 150, .4); }
+        .celebration { position: fixed; z-index: 2; left: calc((100% - var(--panel-width)) / 2); top: 50%; color: #00ff66; font: bold 25px monospace; text-shadow: 0 0 8px #00ff66, 0 0 22px #00ff66; pointer-events: none; transform: translate(-50%, -50%); animation: score-float 1.25s ease-out forwards; }
+        @keyframes score-float { from { opacity: 1; transform: translate(-50%, 0); } to { opacity: 0; transform: translate(-50%, -100px); } }
         .command-guide { position: fixed; left: 12px; bottom: 68px; padding: 9px 11px; border: 1px solid rgba(114, 255, 157, .4); background: rgba(3, 14, 8, .88); color: #9fe8b2; font: 10px/1.5 monospace; text-shadow: 0 0 6px rgba(100, 255, 150, .25); pointer-events: none; }
         .command-guide strong { display: block; margin-bottom: 3px; color: var(--phosphor); font-weight: normal; letter-spacing: .1em; }
         .warning { display: none; position: fixed; z-index: 1; top: 12px; left: 50%; transform: translateX(-50%); padding: 8px 12px; border: 1px solid #ff5555; background: rgba(25, 5, 5, .92); color: #ff7777; font: bold 14px monospace; box-shadow: 0 0 16px rgba(255, 40, 40, .2); }
@@ -312,7 +314,7 @@ async def index():
 <body>
     <canvas aria-label="Aircraft positions"></canvas>
     <div class="label">VECTOR</div>
-    <div class="score">SCORE: 0</div>
+    <div class="score">SCORE: 0 · STREAK: 0 · BEST: 0</div>
     <div class="warning" role="alert">⚠ SEPARATION CONFLICT</div>
     <div class="command-guide" aria-label="Command examples">
         <strong>COMMAND GUIDE</strong>
@@ -345,6 +347,9 @@ async def index():
         const commandHistory = [];
         let audioContext = null;
         let lastConflictPing = 0;
+        let previousScore = null;
+        let bestScore = Number.parseInt(localStorage.getItem("vectorBestScore") || "0", 10);
+        if (!Number.isFinite(bestScore) || bestScore < 0) bestScore = 0;
 
         function enableAudio() {
             if (!audioContext) {
@@ -374,6 +379,33 @@ async def index():
             gain.connect(audioContext.destination);
             oscillator.start(now);
             oscillator.stop(now + 0.18);
+        }
+
+        function playClearanceChime() {
+            if (!audioContext || audioContext.state !== "running") return;
+            const now = audioContext.currentTime;
+            for (const [offset, frequency] of [[0, 660], [0.16, 990]]) {
+                const oscillator = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+                oscillator.type = "sine";
+                oscillator.frequency.setValueAtTime(frequency, now + offset);
+                gain.gain.setValueAtTime(0.0001, now + offset);
+                gain.gain.exponentialRampToValueAtTime(0.16, now + offset + 0.025);
+                gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.22);
+                oscillator.connect(gain);
+                gain.connect(audioContext.destination);
+                oscillator.start(now + offset);
+                oscillator.stop(now + offset + 0.23);
+            }
+        }
+
+        function showClearancePulse() {
+            const pulse = document.createElement("div");
+            pulse.className = "celebration";
+            pulse.textContent = "+100";
+            document.body.append(pulse);
+            pulse.addEventListener("animationend", () => pulse.remove(), { once: true });
+            playClearanceChime();
         }
 
         function drawAircraft() {
@@ -661,6 +693,15 @@ async def index():
                 const response = await fetch("/api/aircraft");
                 if (!response.ok) throw new Error("Aircraft request failed");
                 const state = await response.json();
+                if (previousScore !== null && state.score > previousScore) {
+                    const clearances = Math.floor((state.score - previousScore) / 100);
+                    for (let index = 0; index < clearances; index++) showClearancePulse();
+                }
+                previousScore = state.score;
+                if (state.score > bestScore) {
+                    bestScore = state.score;
+                    localStorage.setItem("vectorBestScore", String(bestScore));
+                }
                 aircraft = state.aircraft;
                 gates = state.gates;
                 if (!aircraft.some(plane => plane.callsign === selectedCallsign)) selectedCallsign = null;
@@ -674,7 +715,7 @@ async def index():
                     if (positions.length > 5) positions.shift();
                     trails.set(plane.callsign, positions);
                 }
-                scoreDisplay.textContent = `SCORE: ${state.score} · STREAK: ${state.streak}`;
+                scoreDisplay.textContent = `SCORE: ${state.score} · STREAK: ${state.streak} · BEST: ${bestScore}`;
                 drawAircraft();
             } catch (error) {
                 console.error(error);
