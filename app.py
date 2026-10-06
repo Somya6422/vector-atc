@@ -48,7 +48,7 @@ CANVAS_WIDTH_NM = 60
 MAX_TURN_DEGREES_PER_TICK = 9
 MAX_ALTITUDE_CHANGE_PER_TICK = 150
 MAX_SPEED_CHANGE_PER_TICK = 10
-HORIZONTAL_SEPARATION_NM = 3
+HORIZONTAL_SEPARATION_NM = 6
 VERTICAL_SEPARATION_FT = 1000
 GATES = {"north": 5000, "east": 10000, "south": 15000, "west": 20000}
 SPAWN_INTERVAL_SECONDS = 40
@@ -324,6 +324,8 @@ async def index():
         const historyList = document.querySelector(".history-list");
         let aircraft = [];
         let gates = {};
+        let selectedCallsign = null;
+        let bearingCursor = null;
         const trails = new Map();
         const commandHistory = [];
         let audioContext = null;
@@ -390,6 +392,25 @@ async def index():
                 context.fillText(`${rangeNm} NM`, centerX + 5, centerY - rangeNm * pixelsPerNm + 14);
             }
             context.shadowBlur = 0;
+
+            if (bearingCursor) {
+                const angle = Math.atan2(bearingCursor.x - centerX, centerY - bearingCursor.y);
+                context.save();
+                context.strokeStyle = "#ffb347";
+                context.fillStyle = "#ffcf70";
+                context.shadowColor = "#ff9d24";
+                context.shadowBlur = 9;
+                context.lineWidth = 1.5;
+                context.beginPath();
+                context.moveTo(centerX, centerY);
+                context.lineTo(bearingCursor.x, bearingCursor.y);
+                context.stroke();
+                const bearing = (Math.round((angle * 180 / Math.PI + 360) % 360) + 360) % 360;
+                context.textAlign = "left";
+                context.font = "11px monospace";
+                context.fillText(`${String(bearing).padStart(3, "0")}°`, bearingCursor.x + 8, bearingCursor.y - 8);
+                context.restore();
+            }
 
             // Bearing ticks and labels around the outer 45 NM range ring.
             const compassRadius = 45 * pixelsPerNm;
@@ -507,6 +528,39 @@ async def index():
             for (const plane of aircraft) {
                 const x = plane.x * width;
                 const y = plane.y * height;
+                const safetyRadius = 3 * pixelsPerNm;
+                context.save();
+                context.beginPath();
+                context.arc(x, y, safetyRadius, 0, Math.PI * 2);
+                context.setLineDash([4, 4]);
+                context.strokeStyle = plane.in_conflict ? "rgba(255, 55, 55, .8)" : "rgba(100, 220, 255, .35)";
+                context.lineWidth = 1;
+                context.stroke();
+                context.setLineDash([]);
+                context.restore();
+
+                if (plane.callsign === selectedCallsign) {
+                    const gatePoints = {
+                        north: [x, 0], east: [width, y],
+                        south: [x, height], west: [0, y],
+                    };
+                    const [gateX, gateY] = gatePoints[plane.assigned_gate] || [x, y];
+                    context.save();
+                    context.strokeStyle = "#65f6ff";
+                    context.shadowColor = "#00eaff";
+                    context.shadowBlur = 12;
+                    context.setLineDash([7, 6]);
+                    context.beginPath();
+                    context.moveTo(x, y);
+                    context.lineTo(gateX, gateY);
+                    context.stroke();
+                    context.setLineDash([]);
+                    context.beginPath();
+                    context.arc(x, y, 11, 0, Math.PI * 2);
+                    context.lineWidth = 2;
+                    context.stroke();
+                    context.restore();
+                }
                 const heading = plane.heading * Math.PI / 180;
                 const distancePixels = (plane.ground_speed / 60) * (width / 60);
                 const conflicting = plane.in_conflict;
@@ -559,6 +613,34 @@ async def index():
             context.textAlign = "left";
         }
 
+        canvas.addEventListener("pointermove", (event) => {
+            const rect = canvas.getBoundingClientRect();
+            bearingCursor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+            drawAircraft();
+        });
+
+        canvas.addEventListener("pointerleave", () => {
+            bearingCursor = null;
+            drawAircraft();
+        });
+
+        canvas.addEventListener("click", (event) => {
+            const rect = canvas.getBoundingClientRect();
+            const width = rect.width;
+            const height = rect.height;
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+            const plane = [...aircraft].reverse().find(item =>
+                Math.hypot(item.x * width - x, item.y * height - y) <= 14
+            );
+            if (!plane) return;
+            selectedCallsign = plane.callsign;
+            commandInput.value = `${plane.callsign} `;
+            commandInput.focus();
+            commandInput.setSelectionRange(commandInput.value.length, commandInput.value.length);
+            drawAircraft();
+        });
+
         async function refreshAircraft() {
             try {
                 const response = await fetch("/api/aircraft");
@@ -566,6 +648,7 @@ async def index():
                 const state = await response.json();
                 aircraft = state.aircraft;
                 gates = state.gates;
+                if (!aircraft.some(plane => plane.callsign === selectedCallsign)) selectedCallsign = null;
                 const activeCallsigns = new Set(aircraft.map(plane => plane.callsign));
                 for (const callsign of trails.keys()) {
                     if (!activeCallsigns.has(callsign)) trails.delete(callsign);
