@@ -249,7 +249,10 @@ async def post_command(command: Command):
     heading = re.search(r"\bheading\s*(\d{1,3})\b", normalized)
     flight_level = re.search(r"\b(?:flight\s+level|fl)\s*(\d{1,3})\b", normalized)
     altitude = re.search(r"\b(?:altitude|climb|descend)\s*(\d{3,5})\b", normalized)
-    speed = re.search(r"\b(?:speed|maintain)\s*(\d{2,3})\b", normalized)
+    speed = re.search(
+        r"\b(?:increase\s+speed\s+to|reduce\s+speed\s+to|maintain\s+speed|speed)\s*(\d{2,3})(?:\s*knots?)?\b",
+        normalized,
+    )
     gate = re.search(r"\b(north|east|south|west)\s+gate\b|\bgate\s+(north|east|south|west)\b", normalized)
     if heading:
         plane["target_heading"] = int(heading.group(1)) % 360
@@ -309,11 +312,26 @@ async def index():
         .history-list li { padding: 10px 0; border-top: 1px solid #1b3825; overflow-wrap: anywhere; }
         .understood { color: #00ff66; }
         .not-understood { color: #ff6666; }
+        .help-button { position: fixed; z-index: 2; top: 9px; left: 104px; padding: 4px 8px; border: 1px solid rgba(140, 255, 176, .55); border-radius: 2px; background: rgba(3, 14, 8, .9); color: var(--phosphor); font: 11px monospace; cursor: pointer; }
+        .help-button:hover, .briefing-button:hover { background: #153522; box-shadow: 0 0 12px rgba(63, 255, 117, .28); }
+        .briefing-overlay { position: fixed; z-index: 10; inset: 0; display: grid; place-items: center; padding: 20px; overflow-y: auto; background: rgba(0, 0, 0, .82); }
+        .briefing-modal { position: relative; width: min(720px, 100%); max-height: 100%; overflow-y: auto; padding: 25px 28px; border: 1px solid #72ff9d; background: repeating-linear-gradient(0deg, rgba(0, 255, 102, .035) 0 1px, transparent 1px 4px), radial-gradient(ellipse at center, #0b2012, #030a06 78%); color: #c5f5d0; font: 13px/1.6 monospace; box-shadow: 0 0 30px rgba(0, 255, 102, .22), inset 0 0 30px rgba(0, 255, 102, .08); text-shadow: 0 0 5px rgba(100, 255, 150, .2); }
+        .briefing-modal h1 { margin: 0 0 5px; color: var(--phosphor); font-size: 18px; letter-spacing: .12em; }
+        .briefing-kicker { margin: 0 0 18px; color: #78c990; font-size: 10px; letter-spacing: .16em; }
+        .briefing-modal section { padding: 12px 0; border-top: 1px solid rgba(114, 255, 157, .25); }
+        .briefing-modal h2 { margin: 0 0 6px; color: #a3e9b5; font-size: 13px; letter-spacing: .08em; }
+        .briefing-modal p { margin: 5px 0; }
+        .briefing-modal ul { margin: 5px 0 0; padding-left: 20px; }
+        .briefing-modal li { margin: 3px 0; }
+        .briefing-modal code { color: #b8ffc9; font: inherit; }
+        .briefing-button { display: block; margin: 16px auto 0; padding: 11px 18px; border: 1px solid #72ff9d; border-radius: 2px; background: #0b2714; color: var(--phosphor); font: bold 12px monospace; letter-spacing: .08em; cursor: pointer; }
+        @media (max-width: 600px) { .briefing-modal { padding: 20px 16px; font-size: 12px; } .help-button { left: 92px; } }
     </style>
 </head>
 <body>
     <canvas aria-label="Aircraft positions"></canvas>
     <div class="label">VECTOR</div>
+    <button class="help-button" type="button" aria-label="Reopen controller briefing">[?] BRIEFING</button>
     <div class="score">SCORE: 0 · STREAK: 0 · BEST: 0</div>
     <div class="warning" role="alert">⚠ SEPARATION CONFLICT</div>
     <div class="command-guide" aria-label="Command examples">
@@ -332,13 +350,43 @@ async def index():
         <span class="voice-ready"><span class="voice-caret" aria-hidden="true">▍</span>READY FOR VOICE CLEARANCE</span>
         <input class="command" type="text" aria-label="Command" placeholder="Enter voice command...">
     </div>
+    <div class="briefing-overlay" role="presentation">
+        <article class="briefing-modal" role="dialog" aria-modal="true" aria-labelledby="briefing-title">
+            <h1 id="briefing-title">TACTICAL PREFLIGHT BRIEFING</h1>
+            <p class="briefing-kicker">VECTOR ATC // CONTROLLER ORIENTATION</p>
+            <section>
+                <h2>01 // THE GOLDEN RULE</h2>
+                <p><strong>Strict zero typing.</strong> Speak every clearance using Wispr Flow voice detection. Keyboard use is limited to pressing <strong>Enter</strong> to submit recognized speech; do not type commands.</p>
+            </section>
+            <section>
+                <h2>02 // YOUR OBJECTIVE</h2>
+                <p>Vector each aircraft safely to its assigned perimeter gate at that gate's required altitude. Maintain at least <strong>3 nautical miles</strong> of horizontal separation and <strong>1,000 ft</strong> of vertical separation at all times.</p>
+            </section>
+            <section>
+                <h2>03 // APPROVED PHRASEBOOK</h2>
+                <ul>
+                    <li>Heading: <code>“Indigo 421 heading 090”</code></li>
+                    <li>Flight level: <code>“Vistara 60 flight level 150”</code></li>
+                    <li>Altitude: <code>“Indigo 421 climb 12000”</code> or <code>“Vistara 60 descend 9000”</code></li>
+                    <li>Speed: <code>“Indigo 421 speed 220”</code></li>
+                    <li>Direct gate clearance: <code>“Vistara 60 west gate”</code> (automatically assigns gate heading and altitude)</li>
+                    <li>Vector reset: <code>“VECTOR reset”</code></li>
+                </ul>
+            </section>
+            <button class="briefing-button" type="button">ACKNOWLEDGE AND BEGIN</button>
+        </article>
+    </div>
     <script>
         const canvas = document.querySelector("canvas");
         const context = canvas.getContext("2d");
         const commandInput = document.querySelector(".command");
+        const voiceStatus = document.querySelector(".voice-ready");
         const warningBanner = document.querySelector(".warning");
         const scoreDisplay = document.querySelector(".score");
         const historyList = document.querySelector(".history-list");
+        const briefingOverlay = document.querySelector(".briefing-overlay");
+        const briefingButton = document.querySelector(".briefing-button");
+        const helpButton = document.querySelector(".help-button");
         let aircraft = [];
         let gates = {};
         let selectedCallsign = null;
@@ -362,6 +410,20 @@ async def index():
 
         window.addEventListener("pointerdown", enableAudio);
         window.addEventListener("keydown", enableAudio);
+
+        function openBriefing() {
+            briefingOverlay.style.display = "grid";
+            briefingButton.focus();
+        }
+
+        function acknowledgeBriefing() {
+            enableAudio();
+            briefingOverlay.style.display = "none";
+            commandInput.focus();
+        }
+
+        briefingButton.addEventListener("click", acknowledgeBriefing);
+        helpButton.addEventListener("click", openBriefing);
 
         function playConflictPing() {
             if (!audioContext || audioContext.state !== "running") return;
@@ -643,7 +705,7 @@ async def index():
                 const gateCode = plane.assigned_gate[0].toUpperCase();
                 const gateAltitude = gates[plane.assigned_gate];
                 const gateAltitudeCode = Number.isFinite(gateAltitude) ? `${gateAltitude / 1000}K` : "—";
-                const tag = `${plane.callsign} ${altitudeArrow}${plane.altitude} FT [gate ${gateCode} ${gateAltitudeCode}]`;
+                const tag = `${plane.callsign} ${altitudeArrow}${plane.altitude} FT ${plane.ground_speed} KT [gate ${gateCode} ${gateAltitudeCode}]`;
                 const side = x > width - 230 ? -1 : 1;
                 context.textAlign = side > 0 ? "left" : "right";
                 context.beginPath();
@@ -771,9 +833,9 @@ async def index():
             window.speechSynthesis.speak(utterance);
         }
 
-        commandInput.addEventListener("keydown", async (event) => {
-            if (event.key !== "Enter") return;
-            const text = commandInput.value;
+        async function submitCommand() {
+            const text = commandInput.value.trim();
+            if (!text) return;
             commandInput.value = "";
             try {
                 const response = await fetch("/api/command", {
@@ -793,6 +855,10 @@ async def index():
                 console.error(error);
                 addCommandHistory(text, false);
             }
+        }
+
+        commandInput.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") submitCommand();
         });
 
         window.addEventListener("resize", drawAircraft);
