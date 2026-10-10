@@ -1,5 +1,7 @@
 # VANTAGE: ZERO
 
+**Play it live:** https://vantage-zero.vercel.app (Chrome or Edge, keyboard and mouse; press **/** in flight for every key and voice command)
+
 Cinematic 3D fighter-aircraft combat — **Mission 01: Operation Cold Threshold** is fully playable from the main menu to the hangar.
 
 Browser game: **Vite + TypeScript + Three.js + Web Audio API**. Everything (terrain, aircraft, audio, dialogue) is generated locally – no external assets, no network and no API keys are needed to play.
