@@ -8,7 +8,7 @@ import { AudioEngine } from '../src/audio/AudioEngine';
 import { SCRIPT, HANGAR_SCRIPT, resolveRole } from '../src/story/Script';
 import { Settings } from '../src/ui/Settings';
 
-function rig(route: 'A_BOY_SU57' | 'B_GIRL_F35' = 'A_BOY_SU57', id: 'm01' | 'school' = 'm01') {
+function rig(route: 'A_BOY_SU57' | 'B_GIRL_F35' = 'A_BOY_SU57', id: 'm01' | 'm02' | 'm03' | 'school' = 'm01') {
   resetBlizzard();
   const player = new Unit('ownship', 'Specter-1', 'player', route === 'A_BOY_SU57' ? SU57 : F35, world, 1);
   const wingman = new Unit('wingman', 'Specter-2', 'friendly', route === 'A_BOY_SU57' ? F35 : SU57, world, 2);
@@ -174,5 +174,31 @@ describe('dialogue + subtitles + audio fallbacks', () => {
   it('settings expose the separate volume buses', () => {
     const s = Settings.sanitize({});
     for (const k of ['master', 'engines', 'weapons', 'dialogue', 'radio', 'music', 'environment'] as const) expect(typeof s[k]).toBe('number');
+  });
+});
+
+describe('missions 02 and 03', () => {
+  it('specs: more hostiles, gates and no-storm routing', async () => {
+    const { MISSIONS } = await import('../src/missions/MissionSpecs');
+    expect(MISSIONS.m02.drones).toBe(4); expect(MISSIONS.m02.storm).toBe(false);
+    expect(MISSIONS.m03.gates).toBe(4); expect(MISSIONS.m03.storm).toBe(true);
+    expect(MISSIONS.school.drones).toBe(0);
+  });
+  it('mission 03 builds four gates in the valley and counts a flown-through gate', () => {
+    const r = rig('A_BOY_SU57', 'm03');
+    expect(r.d.gates.length).toBe(4);
+    const g = r.d.gates[0];
+    for (const gt of r.d.gates) { expect(gt.z).toBeLessThan(WAYPOINTS.W1.z); expect(gt.z).toBeGreaterThan(WAYPOINTS.W2.z); }
+    // simulate being in P2 and flying through the first gate
+    (r.d as unknown as { phase: string }).phase = 'P2_TRANSIT';
+    r.d.objectives.push({ id: 'gates', text: 'x', state: 'active' });
+    r.place(r.player, g.x, g.y, g.z, { speed: 200 });
+    r.run(0.5);
+    expect(r.d.gates[0].passed).toBe(true);
+    expect(r.d.stats.gatesPassed).toBe(1);
+  });
+  it('mission 02 skips the blizzard once all drones are down', () => {
+    const r = rig('A_BOY_SU57', 'm02');
+    expect(r.d.spec.storm).toBe(false);
   });
 });

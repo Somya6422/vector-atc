@@ -23,7 +23,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'pause', label: 'Pause', group: 'Game', def: 'Escape' },
   { id: 'guide', label: 'Quick-start guide', group: 'Game', def: 'KeyI' },
   { id: 'hint', label: 'Ground Control hint', group: 'Game', def: 'KeyH' },
-  { id: 'interact', label: 'Interact (engine start / Nyx)', group: 'Game', def: 'KeyF' },
+  { id: 'interact', label: 'Interact (engine start)', group: 'Game', def: 'KeyF' },
   { id: 'target', label: 'Cycle target', group: 'Weapons', def: 'KeyR' },
   { id: 'weapon', label: 'Cycle weapon', group: 'Weapons', def: 'KeyT' },
   { id: 'fire', label: 'Fire selected weapon', group: 'Weapons', def: 'Space', note: 'left mouse also fires the cannon' },

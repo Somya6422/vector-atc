@@ -30,7 +30,6 @@ export class AudioEngine {
   private gunOn = false;
   private music: { oscs: OscillatorNode[]; gain: GainNode; lp: BiquadFilterNode; pulse: GainNode; mood: MusicMood } | null = null;
   private ambience: { out: GainNode; sources: AudioScheduledSourceNode[] } | null = null;
-  private purr: { gain: GainNode; sources: AudioScheduledSourceNode[] } | null = null;
   private lastMach = 0;
   readonly log: string[] = [];
 
@@ -265,30 +264,8 @@ export class AudioEngine {
       const a = this.ambience; a.out.gain.setTargetAtTime(0, ctx.currentTime, 0.3); setTimeout(() => a.sources.forEach(s => { try { s.stop(); } catch { /* */ } }), 900); this.ambience = null;
     }
   }
-  setPurr(on: boolean) {
-    const ctx = this.ctx; if (!ctx) return;
-    if (on && !this.purr) {
-      const out = this.gainNode(0, this.buses.environment);
-      const n = this.noise(this.brown); const lp = this.filt('lowpass', 260, 1.2);
-      const mod = ctx.createGain(); mod.gain.value = 0.5; const lfo = ctx.createOscillator(); lfo.frequency.value = 25; const lg = ctx.createGain(); lg.gain.value = 0.5; lfo.connect(lg); lg.connect(mod.gain);
-      n.connect(lp); lp.connect(mod); mod.connect(out); n.start(); lfo.start();
-      out.gain.setTargetAtTime(0.7, ctx.currentTime, 0.3); this.purr = { gain: out, sources: [n, lfo] };
-    } else if (!on && this.purr) {
-      const p = this.purr; p.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.4); setTimeout(() => p.sources.forEach(s => { try { s.stop(); } catch { /* */ } }), 1500); this.purr = null;
-    }
-  }
-  meow() {
-    const ctx = this.ctx; if (!ctx) return;
-    const o = ctx.createOscillator(); o.type = 'sawtooth'; const bp = this.filt('bandpass', 1200, 5); const g = this.gainNode(0, this.buses.environment);
-    const t = ctx.currentTime;
-    o.frequency.setValueAtTime(520, t); o.frequency.linearRampToValueAtTime(900, t + 0.18); o.frequency.linearRampToValueAtTime(560, t + 0.55);
-    bp.frequency.setValueAtTime(900, t); bp.frequency.linearRampToValueAtTime(2200, t + 0.2); bp.frequency.linearRampToValueAtTime(1000, t + 0.55);
-    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.35, t + 0.06); g.gain.linearRampToValueAtTime(0, t + 0.6);
-    o.connect(bp); bp.connect(g); o.start(t); o.stop(t + 0.65);
-  }
-
   /** Silence everything that is continuous (used on mission end / pause). */
-  quiet() { this.setGun(false); this.setLockTone('NONE'); this.setWarning('none'); this.setPurr(false); }
+  quiet() { this.setGun(false); this.setLockTone('NONE'); this.setWarning('none'); }
   pauseAll() { void this.ctx?.suspend(); }
   resumeAll() { if (this.ctx && this.ctx.state === 'suspended') void this.ctx.resume(); }
 }

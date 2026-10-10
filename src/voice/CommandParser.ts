@@ -13,7 +13,7 @@ export type Cmd =
   | { t: 'weapon'; w: 'GUN' | 'IR' | 'RADAR' } | { t: 'target' } | { t: 'fire'; w?: 'GUN' | 'IR' | 'RADAR' } | { t: 'cease' }
   | { t: 'wing'; cmd: 'cover' | 'engage' | 'rejoin' | 'formation'; f?: 'ECHELON_RIGHT' | 'LINE_ABREAST' | 'TRAIL' } | { t: 'wing_report' }
   | { t: 'report'; what: 'status' | 'fuel' | 'altitude' | 'speed' | 'heading' | 'enemies' | 'airfield' }
-  | { t: 'camera'; view?: 'chase' | 'cockpit' | 'wing' | 'orbit' | 'front' | 'flyby'; next?: boolean } | { t: 'mouse'; on?: boolean } | { t: 'radar_range'; km: number }
+  | { t: 'camera'; view?: 'chase' | 'cockpit' | 'wing' | 'tail' | 'orbit' | 'front' | 'target' | 'tactical' | 'tower' | 'cinematic' | 'flyby'; next?: boolean } | { t: 'mouse'; on?: boolean } | { t: 'radar_range'; km: number }
   | { t: 'pause' } | { t: 'resume' } | { t: 'map' } | { t: 'objectives' } | { t: 'hint' } | { t: 'start_engines' } | { t: 'restart' } | { t: 'hangar' } | { t: 'menu' }
   | { t: 'new_campaign' } | { t: 'pick_route'; route: 'A_BOY_SU57' | 'B_GIRL_F35' } | { t: 'launch' } | { t: 'briefing' } | { t: 'continue' } | { t: 'settings' } | { t: 'controls' } | { t: 'credits' } | { t: 'back' } | { t: 'interact' }
   | { t: 'radio'; to: 'ground' | 'wingman'; text: string }
@@ -70,7 +70,7 @@ function parseClause(s: string, raw: string): Cmd[] {
   if (has(/\bsettings\b|\boptions\b/)) return [{ t: 'settings' }];
   if (has(/\b(controls|keyboard|key bindings?|keybinds?)\b/)) return [{ t: 'controls' }];
   if (has(/\bcredits\b/)) return [{ t: 'credits' }];
-  if (has(/\b(pet|stroke|cuddle)\b.*\b(cat|nyx)\b|\b(talk to|interact with|greet|say hello to)\b.*\b(cat|nyx)\b|^interact$/)) return [{ t: 'interact' }];
+  if (has(/^interact$/)) return [{ t: 'interact' }];
   if (has(/^(go )?back$|^close( this| it)?$|^cancel$|^never ?mind$/)) return [{ t: 'back' }];
 
   // ---- pause / resume / panels ----
@@ -152,8 +152,8 @@ function parseClause(s: string, raw: string): Cmd[] {
 
   // ---- camera / view ----
   if (has(/\b(next|change|switch|cycle)( the)?( camera| view| angle)\b|\bnext (camera|view|angle)\b/)) return [{ t: 'camera', next: true }];
-  if ((m = s.match(/\b(chase|cockpit|wing|side|orbit|front|flyby|fly by|external|tail)\b/)) && has(/\b(camera|view|angle|show|switch|look|go to)\b|^(chase|cockpit|orbit|flyby)$/)) {
-    const v = m[1]; const map: Record<string, 'chase' | 'cockpit' | 'wing' | 'orbit' | 'front' | 'flyby'> = { chase: 'chase', external: 'chase', tail: 'chase', cockpit: 'cockpit', wing: 'wing', side: 'wing', orbit: 'orbit', front: 'front', flyby: 'flyby', 'fly by': 'flyby' };
+  if ((m = s.match(/\b(chase|cockpit|wing|side|orbit|front|flyby|fly by|external|tail|rear|tactical|overhead|top down|tower|target|cinematic|movie)\b/)) && has(/\b(camera|view|angle|show|switch|look|go to)\b|^(chase|cockpit|orbit|flyby|tail|tactical|tower|cinematic)$/)) {
+    const v = m[1]; const map: Record<string, 'chase' | 'cockpit' | 'wing' | 'tail' | 'orbit' | 'front' | 'target' | 'tactical' | 'tower' | 'cinematic' | 'flyby'> = { chase: 'chase', external: 'chase', tail: 'tail', rear: 'tail', tactical: 'tactical', overhead: 'tactical', 'top down': 'tactical', tower: 'tower', target: 'target', cinematic: 'cinematic', movie: 'cinematic', cockpit: 'cockpit', wing: 'wing', side: 'wing', orbit: 'orbit', front: 'front', flyby: 'flyby', 'fly by': 'flyby' };
     return [{ t: 'camera', view: map[v] }];
   }
   if (has(/\bmouse (aim|flight|control)\b/)) return [{ t: 'mouse', on: has(/\boff\b|\bdisable\b|\bstop\b/) ? false : has(/\bon\b|\benable\b|\bturn on\b|\bstart\b/) ? true : undefined }];

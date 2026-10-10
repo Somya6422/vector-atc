@@ -8,7 +8,7 @@ import { MISSILES, SENSOR } from '../combat/WeaponSpecs';
 import { FORMATION_LABEL, type Formation } from '../ai/WingmanAI';
 import { terrainHeight } from '../world/Heightfield';
 
-export type CameraView = 'chase' | 'cockpit' | 'wing' | 'orbit' | 'front' | 'flyby';
+export type CameraView = 'chase' | 'cockpit' | 'wing' | 'tail' | 'orbit' | 'front' | 'target' | 'tactical' | 'tower' | 'cinematic' | 'flyby';
 export interface HudWarnings {
   stall: boolean; stallWarn: boolean; pullUp: boolean; missile: { bearing: number; range: number; ir: boolean } | null;
   bingo: boolean; lowFuel: boolean; damage: boolean; flameout: boolean; overG: boolean; interference: number; lockedOn: boolean;
@@ -407,7 +407,7 @@ export class HUD {
     const x = 20, y = 24;
     g.font = '13px Consolas, monospace'; g.textAlign = 'left';
     g.fillStyle = 'rgba(0,18,10,0.42)'; g.fillRect(x - 8, y - 14, 360, 20 + mi.objectives.filter(o => o.state !== 'pending').slice(-5).length * 34 + 8);
-    g.fillStyle = CYAN; g.fillText('OPERATION COLD THRESHOLD  ·  ' + mi.phase.split('_')[0] + ' ' + mi.phase.split('_').slice(1).join(' '), x, y);
+    g.fillStyle = CYAN; g.fillText(mi.spec.name.toUpperCase() + '  ·  ' + mi.phase.split('_')[0] + ' ' + mi.phase.split('_').slice(1).join(' '), x, y);
     let i = 0;
     for (const o of mi.objectives.filter(o => o.state !== 'pending').slice(-5)) {
       const yy = y + 22 + i * 34; i++;

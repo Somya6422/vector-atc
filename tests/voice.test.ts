@@ -68,7 +68,9 @@ describe('voice command parser', () => {
     expect(one('select specter two')).toEqual({ t: 'pick_route', route: 'B_GIRL_F35' });
     expect(one('choose the boy')).toEqual({ t: 'pick_route', route: 'A_BOY_SU57' });
     expect(one('launch the mission')).toEqual({ t: 'launch' });
-    expect(one('pet the cat')).toEqual({ t: 'interact' });
+    expect(one('interact')).toEqual({ t: 'interact' });
+    expect(one('switch to tactical view')).toEqual({ t: 'camera', view: 'tactical' });
+    expect(one('tail camera')).toEqual({ t: 'camera', view: 'tail' });
   });
   it('chains several commands and rejects gibberish', () => {
     expect(parseCommands('gear up and throttle eighty percent then climb to five thousand feet').map(c => c.t)).toEqual(['gear', 'throttle', 'alt']);

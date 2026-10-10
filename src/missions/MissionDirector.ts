@@ -1,11 +1,12 @@
 import type { Unit } from '../game/Entity';
 import type { Route, Grade } from '../persistence/SaveManager';
-import { BLIZZARD, placeBlizzard, FIELD_ELEV, RADAR_SITES, WAYPOINTS, WORLD, ALT_ROUTE_POINT, lineOfSight, radarSiteAlt, terrainHeight, blizzardAt, RUNWAY } from '../world/Heightfield';
+import { BLIZZARD, placeBlizzard, FIELD_ELEV, RADAR_SITES, WAYPOINTS, WORLD, ALT_ROUTE_POINT, cxMain, lineOfSight, radarSiteAlt, terrainHeight, blizzardAt, RUNWAY } from '../world/Heightfield';
 import { approachInfo } from '../world/Landing';
 import type { OutcomeKind } from '../story/Script';
 import { DEG, FT, KT, clamp } from '../util/math';
 
-export type MissionId = 'm01' | 'school';
+import { MISSIONS, type MissionId } from './MissionSpecs';
+export type { MissionId } from './MissionSpecs';
 export type Phase = 'P1_TAKEOFF' | 'P2_TRANSIT' | 'P3_INTERCEPT' | 'P4_BLIZZARD' | 'P5_RTB' | 'P6_DEBRIEF' | 'FAILED';
 export type ObjState = 'pending' | 'active' | 'done' | 'failed';
 export interface Objective { id: string; text: string; state: ObjState; detail?: string; }
@@ -19,7 +20,7 @@ export interface MissionStats {
   route: 'NONE' | 'MAIN' | 'ALT'; stormTime: number; wingmanSeparatedTime: number;
   touchdownSink: number; touchdownKt: number; hardLanding: boolean; landed: boolean;
   fuelAtEnd: number; healthAtEnd: number; wingHealthAtEnd: number; wingLanded: boolean; bingo: boolean;
-  shotsFired: number; hits: number; friendlyDamage: number; assistLanding: boolean;
+  shotsFired: number; hits: number; friendlyDamage: number; assistLanding: boolean; gatesPassed: number;
 }
 export interface MissionResult {
   completed: boolean; failReason: FailReason; score: number; maxScore: number; grade: Grade;
@@ -59,10 +60,13 @@ export class MissionDirector {
   engineStartRequested = false;
   leaderRolling = false;
   result: MissionResult | null = null;
+  get spec() { return MISSIONS[this.id]; }
+  /** optional low-level gates (bonus task): positions fixed at construction, passed flags updated in flight */
+  readonly gates: { x: number; y: number; z: number; passed: boolean }[] = [];
   readonly stats: MissionStats = {
     time: 0, kills: 0, bvrKills: 0, gunKills: 0, irKills: 0, escaped: 0, maxDetect: 0, detected: false, maskedTime: 0, exposedTime: 0,
     missileHitsTaken: 0, flaresUsed: 0, rescues: 0, route: 'NONE', stormTime: 0, wingmanSeparatedTime: 0, touchdownSink: 0, touchdownKt: 0,
-    hardLanding: false, landed: false, fuelAtEnd: 0, healthAtEnd: 0, wingHealthAtEnd: 0, wingLanded: false, bingo: false, shotsFired: 0, hits: 0, friendlyDamage: 0, assistLanding: false,
+    hardLanding: false, landed: false, fuelAtEnd: 0, healthAtEnd: 0, wingHealthAtEnd: 0, wingLanded: false, bingo: false, shotsFired: 0, hits: 0, friendlyDamage: 0, assistLanding: false, gatesPassed: 0,
   };
   private step = {
     lineup: false, rotateCall: false, gearCall: false, climbCall: false, wp1: false, wp2: false, contact: false, idCall: false, frontWarn: 0, interf: false, routeMsg: false,
@@ -85,6 +89,11 @@ export class MissionDirector {
       { id: 'climb', text: 'Retract gear and climb to 4,000 ft', state: 'pending' },
     ]);
     this.nav = [{ id: 'field', name: 'RUNWAY 36', x: 0, y: FIELD_ELEV, z: 1100, kind: 'field' }];
+    const n = this.spec.gates;
+    for (let i = 0; i < n; i++) {
+      const z = WAYPOINTS.W1.z + (WAYPOINTS.W2.z - WAYPOINTS.W1.z) * (i + 1) / (n + 1), x = cxMain(z);
+      this.gates.push({ x, y: terrainHeight(x, z) + 150, z, passed: false });
+    }
   }
 
   // ----------------------------------------------------------------- helpers
@@ -183,6 +192,7 @@ export class MissionDirector {
   private p2Begin() {
     this.enter('P2_TRANSIT');
     this.addObjective({ id: 'wp1', text: `Fly the valley low to ${WAYPOINTS.W1.name.replace('WP1 ', '')}`, state: 'active' });
+    if (this.gates.length) this.addObjective({ id: 'gates', text: `Bonus: fly the valley gates (0 / ${this.gates.length})`, state: 'active' });
     if (this.id !== 'school') this.addObjective({ id: 'wp2', text: `Continue to ${WAYPOINTS.W2.name.replace('WP2 ', '')} – stay terrain-masked`, state: 'pending' });
     this.nav = [
       { id: 'wp1', name: WAYPOINTS.W1.name, x: WAYPOINTS.W1.x, y: 700, z: WAYPOINTS.W1.z, kind: 'wp' },
@@ -192,8 +202,22 @@ export class MissionDirector {
 
   // ----------------------------------------------------------------- phase 2
   private reached(wp: { x: number; z: number }, r = 2800) { const pm = this.host.player.model; return Math.hypot(pm.pos.x - wp.x, pm.pos.z - wp.z) < r; }
+  private updateGates() {
+    if (!this.gates.length) return;
+    const pp = this.host.player.pos;
+    for (const g of this.gates) {
+      if (g.passed) continue;
+      if (Math.hypot(pp.x - g.x, pp.y - g.y, pp.z - g.z) < 95) {
+        g.passed = true; this.stats.gatesPassed++;
+        const o = this.obj('gates'); if (o) o.text = `Bonus: fly the valley gates (${this.stats.gatesPassed} / ${this.gates.length})`;
+        this.setState('gates', this.stats.gatesPassed >= this.gates.length ? 'done' : 'active', `${this.stats.gatesPassed} / ${this.gates.length}`);
+        this.host.sayRole('GC', this.stats.gatesPassed >= this.gates.length ? 'All gates cleared. Beautiful flying.' : 'Gate cleared.', 1, 'gate');
+      }
+    }
+  }
   private p2() {
     const h = this.host, s = this.step;
+    this.updateGates();
     if (!s.wp1 && this.reached(WAYPOINTS.W1)) {
       s.wp1 = true; this.setState('wp1', 'done'); h.say('wp1');
       // Flight School: practise the circuit only – turn around at Halcyon Gate and land
@@ -210,7 +234,9 @@ export class MissionDirector {
     this.enter('P3_INTERCEPT'); this.p3Start = this.t;
     this.host.activateDrones(this.alerted);
     this.addObjective({ id: 'find', text: 'Detect and identify the unknown contacts (R to select)', state: 'active' });
-    this.addObjective({ id: 'kill', text: 'Neutralise both hostile drones', state: 'pending', detail: '0 / 2' });
+    const nd = this.host.drones.length;
+    this.addObjective({ id: 'kill', text: nd === 2 ? 'Neutralise both hostile drones' : `Neutralise all ${nd} hostile drones`, state: 'pending', detail: `0 / ${nd}` });
+    this.addObjective({ id: 'bonusGun', text: 'Bonus: score a cannon kill (20 mm)', state: 'active' });
     this.nav = [{ id: 'wp3', name: WAYPOINTS.W3.name, x: WAYPOINTS.W3.x, y: 1800, z: WAYPOINTS.W3.z, kind: 'wp' }];
   }
   private p3() {
@@ -222,12 +248,13 @@ export class MissionDirector {
     if (s.idCall && !s.lrHint && h.drones.some(d => d.alive && d.pos.distanceTo(h.player.pos) > 12000 && d.pos.distanceTo(h.player.pos) < 36000)) { s.lrHint = true; h.say(h.route === 'A_BOY_SU57' ? 'hint_lr' : 'hint_lr_B'); }
     // escaped drones (fled out of the play area) are removed – the intercept still resolves
     for (const d of h.drones) if (d.alive && !d.removed && d.pos.z < WORLD.minZ + 2200) { d.removed = true; this.stats.escaped++; h.say('drone_escaped'); }
+    if (this.stats.gunKills > 0 && this.obj('bonusGun')?.state === 'active') this.setState('bonusGun', 'done');
     const dead = h.drones.filter(d => !d.alive).length;
     this.setState('kill', this.obj('kill')!.state === 'pending' ? 'pending' : 'active', `${dead} / ${h.drones.length}`);
     if (live.length === 0) {
       this.setState('find', 'done'); this.setState('kill', 'done', `${dead} / ${h.drones.length}`);
       if (this.stats.escaped === 0) h.say('intercept_done');
-      this.p4Begin();
+      if (this.spec.storm) this.p4Begin(); else this.p5Begin();
     }
   }
 
@@ -366,9 +393,11 @@ export class MissionDirector {
     const b: { label: string; points: number }[] = [];
     const add = (label: string, points: number) => { b.push({ label, points: Math.round(points) }); };
     const school = this.id === 'school';
-    const MAX = school ? 2400 : 5600;
+    const MAX = school ? 2400 : 5600 + (h.drones.length - 2) * 500 + this.gates.length * 100 + 150;
     if (completed) add('Mission complete', 1200);
     if (!school) add(`Hostile drones destroyed (${st.kills}/${h.drones.length})`, st.kills * 500);
+    if (st.gatesPassed) add(`Valley gates (${st.gatesPassed}/${this.gates.length})`, st.gatesPassed * 100);
+    if (!school && st.gunKills) add('Bonus task: cannon kill', 150);
     if (st.bvrKills) add('Long-range missile kill', st.bvrKills * 200);
     if (st.gunKills) add('Cannon kill', st.gunKills * 100);
     if (completed || h.wingman.alive) add('Wingman survived', h.wingman.alive ? 300 + 600 * st.wingHealthAtEnd : 0);

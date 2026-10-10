@@ -120,12 +120,3 @@ export const HANGAR_SCRIPT: Record<OutcomeKind, ScriptLine[]> = {
   FAIL_WING: [L('GC', 'Specter-two is down. The mission is lost. Return to base for a review.')],
   FAIL_FUEL: [L('GC', 'Fuel exhausted. Aircraft lost. Mission failed.')],
 };
-
-/** Hangar + Nyx lines. Only said when the situation is actually true (e.g. Nyx has chosen the boy). */
-export const NYX_SCRIPT = {
-  boyGreets: L('BOY', 'Hey, Nyx. Miss me? Of course you did.'),
-  nyxChoosesBoy: L('GIRL', 'She is not choosing you. She is choosing the jacket. The jacket is warm. I am not jealous.'),
-  girlPets: L('GIRL', 'Nyx, you traitor. Fine. Go sit on his jacket. See if I care.'),
-  boyAnswers: L('BOY', 'You say that, but you have been staring at her for ten minutes.'),
-  intro: L('BOY', 'Nyx knows the sound of my jet. She waits by the jacket every time.'),
-};

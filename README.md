@@ -32,15 +32,15 @@ Click once inside the page so the browser lets the game start audio (Web Audio n
 1. **New Campaign → choose a pilot**
    * **Route A – Specter-1 (boy) flies the Su-57**, wingman Specter-2 (girl) flies the F-35 as an AI.
    * **Route B – Specter-2 (girl) flies the F-35**, wingman Specter-1 (boy) flies the Su-57 as an AI.
-   * The girl's helmet visor is permanently closed, opaque and mirrored gold (metalness 1.0, roughness 0.05, transmission 0.0). Her face is never modelled, anywhere. The game asserts this at load (`checkVisorInvariant`) for every aircraft and for the hangar.
-2. **Hangar** – walk around (WASD, Q/E camera). **F** next to *Nyx* the black cat to interact. Then **Mission Briefing → Launch**.
+   * Pilots are colour-coded: Specter-1 (boy) wears an orange flight suit and helmet, Specter-2 (girl) a teal suit and helmet with auburn hair. The girl no longer wears a mask or mirrored visor; the cat has been removed from the game.
+2. **Hangar** – walk around (WASD, Q/E camera). Then **Mission Briefing → Launch**, or pick **Missions** for Mission 02 and 03.
 3. **Mission 01** (all six phases, driven by real state – no timed cut-scenes):
    1. *Takeoff & scramble* – press **F** to start engines, taxi to runway 36, line up, full power, rotate near 135 kt, gear up, climb through 4,000 ft.
    2. *Low-altitude transit* – fly the Halcyon valley. A fictional radar network (sites in the east pass) detects you only when it has terrain line-of-sight; the HUD shows the detection meter. Staying low is rewarded; climbing above the ridge exposes you and alerts the drones.
    3. *Interception* – two hostile stealth drones. R selects contacts, they must be **identified** (inside 12 km and 30° of the nose for ~2 s) before weapons release. Use the long-range LR-9 radar missile first, then IR-7 (Fox-2) or the 20 mm cannon. Drones fire IR missiles back: use **X** flares and break.
    4. *Blizzard & electronic interference* – a weather front forms ahead of you on the main valley. Wingman sensors degrade (her radar picture, formation keeping and radio are really affected). Choose: the **east pass** (clear, via the Signal Spur beacon) or push **through the blizzard** (visibility ~260 m, turbulence).
    5. *Return & landing* – lower the gear, follow the ILS-style cue on the HUD, touch down near the target speed (115 kt Su-57 / 128 kt F-35 – the F-35 model stalls higher), roll out and stop on the runway.
-   6. *Debrief & hangar* – graded from real events (kills, wingman survival, aircraft condition, landing quality, detection, route…), different dialogue per outcome, hangar scene, Nyx greeting, campaign saved.
+   6. *Debrief & hangar* – graded from real events (kills, wingman survival, aircraft condition, landing quality, detection, route…), different dialogue per outcome, hangar scene, campaign saved.
 
 ## Voice control (Wispr Flow or the browser microphone)
 Everything you can do with keyboard and mouse can also be done by voice or typed text. Press **Enter** (rebindable) to focus the *command line* at the bottom of the screen.
@@ -60,7 +60,7 @@ Everything you can do with keyboard and mouse can also be done by voice or typed
 | Information | "bogey dope", "status report", "fuel status", "where is the airfield", "what is my altitude" |
 | Radio | "tell ground I am heading home", "Specter two, check in" |
 | Views & panels | "cockpit view", "next camera angle", "mouse aim on", "open the map", "objectives", "hint", "pause", "resume" |
-| Menus | "new campaign", "select specter one", "launch the mission", "hangar", "settings", "controls", "pet the cat" |
+| Menus | "new campaign", "select specter one", "launch the mission", "hangar", "settings", "controls" |
 
 Voice commands that fly the aircraft (heading/altitude/speed hold, taxi, take-off, autoland) are real control laws on the same flight model; any manual stick input hands control straight back, and the autopilot has automatic terrain-collision recovery.
 
@@ -85,6 +85,25 @@ In flight a button bar (bottom left) shows the next step and the actions that ma
 - Wingtip **vapor trails** appear when any aircraft pulls more than about 3 g above 600 m.
 - Pilots look into turns and their heads sag under g. Hostile UCAVs have a glowing red sensor eye, canted twin tails and weapon pods so they stand out.
 
+## Missions
+
+| Mission | What it adds |
+|---|---|
+| 01 Operation Cold Threshold | The original six-phase sortie: valley run, two drones, blizzard, landing. Bonus task: cannon kill. |
+| 02 Operation Iron Veil | Four drones in two waves (the second wave arrives about 30 s after contact), clear skies, no blizzard. |
+| 03 Operation Ember Gate | Four glowing valley gates to fly through (bonus points), three drones, then the blizzard. |
+| Flight School | Free practice, no hostiles. |
+
+Bonus tasks appear in the objective list. Mission data lives in `src/missions/MissionSpecs.ts`.
+
+## Cameras (key 5 cycles them)
+
+Chase, cockpit, wing, tail (low rear), orbit, front, target (lock-on, frames the selected contact), tactical (overhead), tower (fixed near the airfield), cinematic (slow orbiting drone shot) and flyby. Voice: "tactical view", "tail camera", "cinematic view", "next camera".
+
+## Jet details
+
+Every aircraft now has squadron-coloured wingtips, visible under-wing missiles that disappear as they are fired, blinking anti-collision strobes, and a hot white core in the afterburner flame.
+
 ## Controls
 
 | Action | Input | Notes |
@@ -103,7 +122,7 @@ In flight a button bar (bottom left) shows the next step and the actions that ma
 | Select weapon | **T** | GUN → IR-7 → LR-9 (shown on the HUD) |
 | Fire | **Space** (selected weapon), **Left mouse** = cannon | Missiles need identification, range and a steady LOCK tone |
 | Countermeasures | **X** | Flares + chaff, with cooldown |
-| Interact | **F** | Context prompt on screen: engine start on the ramp, Nyx in the hangar. **F never launches missiles.** |
+| Interact | **F** | Context prompt on screen: engine start on the ramp. **F never launches missiles.** |
 | Wingman | **1** cover · **2** engage target · **3** rejoin · **4** cycle formation | Echelon Right / Line Abreast / Trail |
 | Radar range / hint | **Z** / **H** | H cycles Ground Control hints 1-3 (auto hints per Settings) |
 | Debug | `` ` `` overlay, F8 teleport, F9 refuel/repair, F10 kill drones | Only when *Debug mode* is enabled in Settings |
@@ -131,7 +150,7 @@ src/
   world/       Heightfield.ts (shared terrain/valleys/weather) · Terrain.ts · Airfield.ts · Sky.ts · Landing.ts
   audio/       AudioEngine.ts (fully synthesised Web Audio)
   story/       DialogueSystem.ts · Script.ts
-  characters/  Nyx.ts (brain + actor) · Avatar.ts
+  characters/  Avatar.ts (coloured pilots)
   ui/          UI.ts · Settings.ts · MapView.ts
   persistence/ SaveManager.ts
 tests/         vitest suites + tests/browser/driver.js (QA driver for the dev server)

@@ -14,7 +14,7 @@ import { HangarScene } from './HangarScene';
 import { HUD } from '../avionics/HUD';
 import { AudioEngine } from '../audio/AudioEngine';
 import { DialogueSystem } from '../story/DialogueSystem';
-import { HANGAR_SCRIPT, NYX_SCRIPT, resolveRole, type OutcomeKind } from '../story/Script';
+import { HANGAR_SCRIPT, resolveRole, type OutcomeKind } from '../story/Script';
 import { SaveManager, freshSave, type Grade, type Route, type StorageLike } from '../persistence/SaveManager';
 import { Settings } from '../ui/Settings';
 import { FIELD_ELEV } from '../world/Heightfield';
@@ -56,11 +56,9 @@ export class Game {
   private showcaseRoute: Route | null = null;
   private showcaseVisuals: Partial<Record<Route, AircraftVisual>> = {};
   private showcaseGroup = new THREE.Group();
-  private hangarNarr = { greeted: false, jealous: false, intro: false };
   private pendingHangarKind: OutcomeKind | null = null;
   private ready = false;
   readonly errors: string[] = [];
-  private nyxPromptShown = false;
   frameCount = 0;
 
   constructor(private host: HTMLElement) {
@@ -217,7 +215,7 @@ export class Game {
     switch (to) {
       case 'MAIN_MENU':
         this.disposeSession(); this.disposeHangar(); this.sm.setActive('flight'); this.hud.setVisible(false); this.setShowcase(this.save.data.route ?? 'A_BOY_SU57');
-        this.audio.setAmbience('none'); this.audio.setMusic('menu'); this.audio.setPurr(false);
+        this.audio.setAmbience('none'); this.audio.setMusic('menu');
         ui.mainMenu(this.save.data, this.save.hasCampaign); this.dialogue.clear();
         break;
       case 'PILOT_SELECTION':
@@ -227,14 +225,14 @@ export class Game {
       case 'HANGAR': this.enterHangar(from); break;
       case 'MISSION_BRIEFING':
         this.disposeSession(); this.disposeHangar(); this.sm.setActive('flight'); this.hud.setVisible(false); this.setShowcase(this.route);
-        this.audio.setAmbience('none'); this.audio.setPurr(false); this.audio.setMusic('menu');
+        this.audio.setAmbience('none'); this.audio.setMusic('menu');
         ui.briefing(this.mission, this.route);
         break;
       case 'LOADING': ui.clear(); ui.setLoading(0.3, 'Preparing aircraft…'); break;
       case 'TAKEOFF':
         this.sm.setActive('flight'); this.hud.setVisible(true); this.setShowcase(null); ui.clear(); ui.setLoading(null); if (from !== 'PAUSED' && !this.pilotBar.seenBefore()) this.pilotBar.showGuide(true); break;
       case 'ACTIVE_MISSION': break;
-      case 'PAUSED': this.session?.pause(); this.audio.pauseAll(); this.audio.setPurr(false); break;
+      case 'PAUSED': this.session?.pause(); this.audio.pauseAll(); break;
       case 'DEBRIEFING': break;
       case 'MISSION_FAILED': break;
       default: break;
@@ -247,7 +245,7 @@ export class Game {
   }
   private disposeHangar() {
     if (!this.hangar) return;
-    this.hangar.dispose(); this.hangar = null; this.audio.setAmbience('none'); this.audio.setPurr(false); this.nyxPromptShown = false; this.ui.showPrompt(null);
+    this.hangar.dispose(); this.hangar = null; this.audio.setAmbience('none'); this.ui.showPrompt(null);
   }
 
   // ------------------------------------------------------------------------- hangar
@@ -255,56 +253,34 @@ export class Game {
     this.disposeSession(); this.disposeHangar();
     const d = this.save.data;
     this.hud.setVisible(false);
-    this.hangar = new HangarScene(this.route, d.nyxBond, d.livery);
+    this.hangar = new HangarScene(this.route, d.livery);
     this.hangar.resize(window.innerWidth, window.innerHeight);
     this.sm.setHangar(this.hangar.scene); this.sm.setActive('hangar');
     this.hangar.onEvent = (e, det) => this.onHangarEvent(e, det);
     this.audio.setAmbience('hangar'); this.audio.setMusic('hangar');
     this.ui.hangarHUD(this.route, d.savedAt);
-    this.hangarNarr = { greeted: false, jealous: false, intro: false };
     this.dialogue.clear();
     const kind = this.pendingHangarKind; this.pendingHangarKind = null;
     const say = (role: 'GC' | 'BOY' | 'GIRL', text: string) => this.dialogue.say({ speaker: resolveRole(role, this.route), text, priority: 1, radio: false });
     if (from === 'DEBRIEFING' && kind) {
       for (const l of HANGAR_SCRIPT[kind]) this.dialogue.say({ speaker: resolveRole(l.role, this.route), text: l.text, priority: 1, radio: l.role === 'GC' });
-      window.setTimeout(() => { this.hangar?.greetReturn(); this.audio.meow(); }, 1800);
     } else {
-      say('BOY', NYX_SCRIPT.intro.text);
+      say('BOY', 'Hangar is quiet. Pick a mission when you are ready.');
     }
-    this.ui.toast('F near Nyx to interact', 4000);
+    this.ui.toast('Walk with WASD, Q/E turns the camera', 4000);
   }
 
   private onHangarEvent(e: string, det?: string) {
     switch (e) {
       case 'footstep': this.audio.footstep(); break;
       case 'clink': this.audio.hangarClink(); break;
-      case 'nyx_meow': this.audio.meow(); break;
-      case 'nyx_purr_on': this.audio.setPurr(true); break;
-      case 'nyx_purr_off': this.audio.setPurr(false); break;
-      case 'nyx_state': this.ui.toast('Nyx: ' + String(det).replace('_', ' ').toLowerCase(), 1400); break;
     }
   }
 
   private hangarFrame(dt: number) {
     const h = this.hangar!;
     h.update(dt, this.input, this.audio.running);
-    const near = h.nearNyx;
-    if (near !== this.nyxPromptShown) { this.nyxPromptShown = near; this.ui.showPrompt(near ? 'Press F to interact with Nyx' : null); }
-    if (this.input.wasPressed('interact') && near) this.hangarInteract();
     this.dialogue.update(dt);
-  }
-
-  private hangarInteract() {
-    const h = this.hangar; if (!h) return null;
-    const msg = h.interact();
-    if (msg) {
-      this.ui.toast(msg, 3000);
-      const d = this.save.data; d.nyxBond = Math.min(100, d.nyxBond + 2); this.save.save();
-      const playerIsBoy = this.route === 'A_BOY_SU57';
-      if (playerIsBoy) { this.dialogue.say({ speaker: 'Specter-1', text: NYX_SCRIPT.boyGreets.text, priority: 1, radio: false }); if (!this.hangarNarr.jealous) { this.hangarNarr.jealous = true; this.dialogue.say({ speaker: 'Specter-2', text: NYX_SCRIPT.nyxChoosesBoy.text, priority: 1, radio: false }); } }
-      else { this.dialogue.say({ speaker: 'Specter-2', text: NYX_SCRIPT.girlPets.text, priority: 1, radio: false }); this.dialogue.say({ speaker: 'Specter-1', text: NYX_SCRIPT.boyAnswers.text, priority: 1, radio: false }); }
-    }
-    return msg;
   }
 
   /** Voice / typed commands that are about the game or its menus rather than the aircraft. Returns feedback, or null if not global. */
@@ -327,13 +303,7 @@ export class Game {
       case 'controls': if (st === 'MAIN_MENU' || st === 'PAUSED') { this.onAction('controls'); return 'Controls.'; } return 'Controls are in the menus.';
       case 'credits': if (st === 'MAIN_MENU') { this.onAction('credits'); return 'Credits.'; } return 'Credits are in the main menu.';
       case 'back': if (this.ui.overlayOpen) { this.onAction('close_overlay'); return 'Closed.'; } if (st === 'MAIN_MENU' || st === 'PILOT_SELECTION') { this.onAction('main_menu'); return 'Back.'; } return 'Nothing to close.';
-      case 'interact': {
-        if (st !== 'HANGAR' || !this.hangar) return 'There is nobody to interact with here.';
-        const h = this.hangar;
-        if (h.nearNyx) { return this.hangarInteract() ?? 'Nyx ignores you.'; }
-        h.goTo(h.nyx.pos.x + 0.9, h.nyx.pos.z + 0.9, () => this.hangarInteract());
-        return 'Walking over to Nyx…';
-      }
+      case 'interact': return 'There is nobody to interact with here.';
       default: return null;
     }
   }

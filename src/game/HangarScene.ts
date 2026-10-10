@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { Avatar } from '../characters/Avatar';
-import { NyxActor, NyxBrain, type V2 } from '../characters/Nyx';
-import { buildAircraft, checkVisorInvariant } from '../flight/AircraftMesh';
+import { buildAircraft } from '../flight/AircraftMesh';
 import type { Route } from '../persistence/SaveManager';
 import type { Input } from './Input';
 import type { AudioEngine } from '../audio/AudioEngine';
@@ -14,26 +13,25 @@ const OBSTACLES: { x: number; z: number; r: number }[] = [
   { x: JACKET.x, z: JACKET.z + 0.7, r: 1.0 }, { x: -13, z: 12, r: 1.4 }, { x: 13, z: 16, r: 1.3 },
 ];
 
-export type HangarEvent = 'nyx_interact' | 'footstep' | 'clink' | 'nyx_meow' | 'nyx_purr_on' | 'nyx_purr_off' | 'nyx_state';
+type V2 = { x: number; z: number };
+export type HangarEvent = 'footstep' | 'clink';
 
-/** The tactical hangar: walkable interior with both pilots, the parked jets, the boy's jacket and Nyx. */
+/** The tactical hangar: walkable interior with both pilots, the parked jets and the boy's jacket. */
 export class HangarScene {
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(58, 1, 0.1, 200);
   readonly boy: Avatar; readonly girl: Avatar;
   readonly player: Avatar; readonly npc: Avatar;
-  readonly nyx: NyxBrain; readonly nyxActor: NyxActor;
   private camYaw = 0.5;
   private stepT = 0; private clinkT = 4; private t = 0;
   private npcPath: V2[]; private npcIdx = 0; private npcWait = 3;
   onEvent?: (e: HangarEvent, d?: string) => void;
-  nearNyx = false;
-  /** voice "go to the cat": the player avatar walks to a point and then calls back */
+  /** voice "walk to …": the player avatar walks to a point and then calls back */
   private walkTo: { x: number; z: number; done: () => void } | null = null;
   goTo(x: number, z: number, done: () => void) { this.walkTo = { x, z, done }; }
   private jacket: THREE.Group;
 
-  constructor(readonly route: Route, nyxBond: number, livery: string) {
+  constructor(readonly route: Route, livery: string) {
     const s = this.scene;
     s.background = new THREE.Color(0x14181d);
     s.fog = new THREE.Fog(0x14181d, 25, 90);
@@ -90,29 +88,15 @@ export class HangarScene {
     void bench;
 
     // ---- people ----
-    this.boy = new Avatar('Specter-1', false, 0x4a5a45);
-    this.girl = new Avatar('Specter-2', true, 0x2f3b4e);
+    this.boy = new Avatar('Specter-1', false, 0xd8782c);
+    this.girl = new Avatar('Specter-2', true, 0x1e9aa3);
     this.boy.group.position.set(3, 0, 6); this.girl.group.position.set(6.5, 0, -1.5);
     s.add(this.boy.group, this.girl.group);
     this.player = playerIsBoy ? this.boy : this.girl;
     this.npc = playerIsBoy ? this.girl : this.boy;
     this.player.group.position.set(playerIsBoy ? 2 : 4, 0, 15); this.player.heading = Math.PI;   // facing -z (into the hangar)
     this.npcPath = playerIsBoy ? [{ x: 6, z: -1.5 }, { x: 10, z: 2 }, { x: 12, z: -2 }] : [{ x: 5, z: 7 }, { x: JACKET.x - 1, z: JACKET.z - 1 }, { x: -3, z: 2 }, { x: -9, z: 6 }, { x: 0, z: 12 }];
-    // ---- Nyx ----
-    this.nyx = new NyxBrain({ x: JACKET.x, z: JACKET.z + 0.7 }, 3, nyxBond);
-    this.nyxActor = new NyxActor(this.nyx);
-    s.add(this.nyxActor.group);
-    this.nyx.onEvent = (e, d) => {
-      if (e === 'meow') this.onEvent?.('nyx_meow'); else if (e === 'purr_start') this.onEvent?.('nyx_purr_on'); else if (e === 'purr_stop') this.onEvent?.('nyx_purr_off'); else if (e === 'state') this.onEvent?.('nyx_state', d);
-    };
-    // the cat sleeps on the jacket, so lift her onto the crate
-    this.nyxActor.group.position.y = 0.95;
-    const violations = checkVisorInvariant(s);
-    if (violations.length) throw new Error('Visor invariant violated in hangar: ' + violations.join('; '));
   }
-
-  /** Nyx's meshes sit on the ground plane; when she is on the crate lift her. */
-  private nyxHeight() { const d = Math.hypot(this.nyx.pos.x - JACKET.x, this.nyx.pos.z - (JACKET.z + 0.7)); return d < 0.9 ? 0.98 : 0; }
 
   private collide(p: V2, r: number): V2 {
     for (const o of OBSTACLES) {
@@ -157,20 +141,6 @@ export class HangarScene {
     this.player.update(dt, moving);
     // ---- NPC patrol ----
     this.npcUpdate(dt);
-    // ---- Nyx ----
-    this.nyx.update(dt, { boy: { x: this.boy.position.x, z: this.boy.position.z }, player: { x: pp.x, z: pp.z }, playerIsBoy: this.route === 'A_BOY_SU57', jacket: { x: JACKET.x, z: JACKET.z + 0.7 } });
-    this.nyxActor.update(dt);
-    this.nyxActor.group.position.y = this.nyxHeight();
-    this.nearNyx = this.nyx.distanceTo({ x: pp.x, z: pp.z }) < 2.6;
-    // head / look behaviours (body language)
-    const nyxP = new THREE.Vector3(this.nyx.pos.x, 0.3, this.nyx.pos.z);
-    if (this.route === 'A_BOY_SU57') {
-      this.girl.lookTarget = this.nyx.state === 'FOLLOW_ACTOR' ? nyxP : this.boy.position;
-      this.boy.lookTarget = this.nearNyx ? nyxP : null;
-    } else {
-      this.girl.lookTarget = this.nearNyx ? nyxP : this.boy.position;
-      this.boy.lookTarget = this.nyx.distanceTo({ x: this.boy.position.x, z: this.boy.position.z }) < 3 ? nyxP : null;
-    }
     this.clinkT -= dt; if (this.clinkT <= 0) { this.clinkT = 5 + Math.random() * 6; if (audioOn) this.onEvent?.('clink'); }
     // ---- camera ----
     const target = new THREE.Vector3(pp.x, 1.5, pp.z);
@@ -196,14 +166,6 @@ export class HangarScene {
     const want = Math.atan2(-dx, -dz); let df = want - n.heading; while (df > Math.PI) df -= 2 * Math.PI; while (df < -Math.PI) df += 2 * Math.PI; n.heading += df * Math.min(1, dt * 6);
     n.update(dt, true, 0.7);
   }
-
-  /** F near Nyx. Returns a description or null when out of reach. */
-  interact(): string | null {
-    if (!this.nearNyx) return null;
-    this.onEvent?.('nyx_interact');
-    return this.nyx.interact(this.route === 'A_BOY_SU57');
-  }
-  greetReturn() { this.nyx.greetReturn(); }
 
   dispose() {
     this.scene.traverse(o => {

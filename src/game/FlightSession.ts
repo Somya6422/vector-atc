@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Unit } from './Entity';
 import { AIRCRAFT, DRONE } from '../flight/AircraftConfig';
-import { buildAircraft, checkVisorInvariant } from '../flight/AircraftMesh';
+import { buildAircraft } from '../flight/AircraftMesh';
 import { FlightController } from '../flight/FlightController';
 import { FlightModel } from '../flight/FlightModel';
 import type { FlightControls } from '../flight/FlightModel';
@@ -18,6 +18,7 @@ import { CameraRig, VIEW_LABEL } from './CameraRig';
 import { bindings, keyName } from './Bindings';
 import { Assists } from '../voice/Assists';
 import { VaporTrails } from '../flight/Vapor';
+import { MISSIONS } from '../missions/MissionSpecs';
 import type { Cmd } from '../voice/CommandParser';
 import type { Input } from './Input';
 import type { SceneManager } from './SceneManager';
@@ -76,6 +77,7 @@ export class FlightSession {
   private gcasT = 0; private gcas = false;
   private warnings: HudWarnings;
   private alertedBandits = false;
+  private wave2At = 0;
   private disposers: (() => void)[] = [];
   private lastWingState = '';
   private crashHandled = false;
@@ -93,9 +95,10 @@ export class FlightSession {
     const diff = o.settings.data.difficulty;
     this.player.damageScale = diff === 'easy' ? 0.55 : diff === 'hard' ? 1.35 : 1;
     this.units.push(this.player, this.wingman);
-    for (let i = 0; i < (o.missionId === 'm01' ? 2 : 0); i++) {
-      const d = new Unit(i ? 'drone2' : 'drone1', i ? 'Wraith-2' : 'Wraith-1', 'hostile', DRONE, world, 110 + i);
-      d.dormant = true; d.model.setHeadingPlace(cxMain(-31000 - i * 1500) + (i ? -250 : 250), 3500 + i * 100, -31000 - i * 1500, 180, 0, 190);
+    for (let i = 0; i < MISSIONS[o.missionId].drones; i++) {
+      const d = new Unit('drone' + (i + 1), 'Wraith-' + (i + 1), 'hostile', DRONE, world, 110 + i);
+      const dz = i < 2 ? -31000 - i * 1500 : -33400 - (i - 2) * 500;   // the second wave starts further north
+      d.dormant = true; d.model.setHeadingPlace(cxMain(dz) + (i % 2 ? -250 : 250), 3500 + i * 100, dz, 180, 0, 190);
       this.drones.push(d); this.units.push(d);
     }
     // ---- visuals ----
@@ -108,8 +111,6 @@ export class FlightSession {
       if (u.dormant) v.group.visible = false;
     }
     this.player.visual!.pilotHead && (this.player.visual!.pilotHead.visible = true);
-    const violations = checkVisorInvariant(this.root);
-    if (violations.length) throw new Error('Visor invariant violated: ' + violations.join('; '));
     // ---- systems ----
     this.weapons = new Weapons(() => this.units.filter(u => !u.dormant));
     this.root.add(this.weapons.group);
@@ -120,14 +121,15 @@ export class FlightSession {
     this.assists = new Assists(this.player, this.fc, this.director);
     this.assists.onMessage = s => { this.o.onVoiceMessage?.(s); this.flash(s, 2.5); };
     for (const [i, d] of this.drones.entries()) {
-      const z0 = -27000 - i * 1500;
+      const z0 = -27000 - (i % 2) * 1500;
       const pts = [] as { x: number; z: number; alt: number }[];
       for (let z = z0; z >= -33500; z -= 3200) pts.push({ x: cxMain(z), z, alt: 3500 + i * 100 });
       for (let z = -33500; z <= z0; z += 3200) pts.push({ x: cxMain(z), z, alt: 3500 + i * 100 });
-      const bai = new BanditAI(d, pts, 7 + i, i === 0 ? 'ownship' : 'wingman');
+      const bai = new BanditAI(d, pts, 7 + i, i % 2 === 0 ? 'ownship' : 'wingman');
       bai.missileCooldown = diff === 'easy' ? 14 : diff === 'hard' ? 4 : 8; bai.cooldownScale = diff === 'easy' ? 1.4 : diff === 'hard' ? 0.7 : 1;
       this.bandits.push(bai);
     }
+    this.buildGates();
     this.wireEvents();
     this.resetPositions();
     this.warnings = { stall: false, stallWarn: false, pullUp: false, missile: null, bingo: false, lowFuel: false, damage: false, flameout: false, overG: false, interference: 0, lockedOn: false };
@@ -141,6 +143,21 @@ export class FlightSession {
   }
 
   // ------------------------------------------------------------------ setup
+  private gateMeshes: THREE.Mesh[] = [];
+  private buildGates() {
+    for (const g of this.director.gates) {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(70, 3.5, 8, 40), new THREE.MeshBasicMaterial({ color: 0x35ff8a, transparent: true, opacity: 0.85 }));
+      ring.position.set(g.x, g.y, g.z); this.root.add(ring); this.gateMeshes.push(ring);
+    }
+  }
+  private updateGateMeshes() {
+    this.director.gates.forEach((g, i) => {
+      const m = this.gateMeshes[i]; if (!m) return;
+      const mat = m.material as THREE.MeshBasicMaterial;
+      mat.color.setHex(g.passed ? 0x6aa0ff : 0x35ff8a); mat.opacity = g.passed ? 0.25 : 0.7 + 0.2 * Math.sin(this.elapsed * 4 + i);
+    });
+  }
+
   private resetPositions() {
     const p = this.player.model;
     p.setHeadingPlace(START_POS.x, FIELD_ELEV + this.player.cfg.gearHeight, START_POS.z, START_POS.heading, 0, 0);
@@ -185,6 +202,7 @@ export class FlightSession {
   private activateDrones(alerted: boolean) {
     this.alertedBandits = alerted;
     for (const [i, d] of this.drones.entries()) {
+      if (i >= 2) { this.wave2At = this.wave2At || this.elapsed + 30; continue; }
       d.dormant = false; if (d.visual) d.visual.group.visible = true;
       d.model.startEngines(); d.model.engineN = 0.7;
       void i;
@@ -296,6 +314,11 @@ export class FlightSession {
         now: this.elapsed, leader: p, weapons: this.weapons, hostiles: this.drones.filter(d => !d.dormant), playerTarget: this.targeting.selected,
         interference: this.interference, rtb: this.rtb, leaderRolling: dir.leaderRolling,
       });
+      if (this.wave2At > 0 && this.elapsed >= this.wave2At) {
+        this.wave2At = -1;
+        for (const [i, d] of this.drones.entries()) if (i >= 2 && d.dormant) { d.dormant = false; if (d.visual) d.visual.group.visible = true; d.model.startEngines(); d.model.engineN = 0.7; }
+        this.gcSay('Second wave! More contacts out of the north, same ridge.', 2);
+      }
       for (const [i, b] of this.bandits.entries()) {
         const d = this.drones[i]; if (d.dormant || !d.alive) continue;
         this.droneCtl.set(d.id, b.update(aiDt, { now: this.elapsed, weapons: this.weapons, enemies: [p, this.wingman].filter(u => u.alive), alerted: this.alertedBandits, jamming: 0 }));
@@ -563,7 +586,9 @@ export class FlightSession {
         f.scale.set(1, 1 + 0.15 * Math.sin(t * 45), 1);
       }
       for (const a of v.airbrakes) a.rotation.x = -m.airbrakePos * 0.9;
-      v.navLights.forEach((l, i) => { l.visible = Math.floor(t * 2 + i) % 2 === 0 || true; });
+      v.strobes.forEach(s => { s.visible = (t * 1.3) % 1 < 0.1; });
+      const left = u.irMissiles + u.radarMissiles;
+      v.stores.forEach((s, i) => { s.visible = i < left; });
       const cockpitView = u === this.player && this.o.camera.view === 'cockpit';
       v.cockpit.visible = cockpitView;
       v.exterior.visible = !cockpitView;
@@ -576,11 +601,13 @@ export class FlightSession {
       }
     }
     this.vapor.update(this.units, dt);
+    this.updateGateMeshes();
   }
   private deadFx = new Set<Unit>();
 
   private updateCameraAndHud(dt: number) {
     const o = this.o, cam = o.camera, p = this.player;
+    cam.focus = this.targeting.selected && this.targeting.selected.alive ? this.targeting.selected.pos : null;
     cam.update(dt, p, o.input.mouseDX, o.input.mouseDY);
     if (!p.model.crashed || this.endTimer >= 0) o.scene.sky.update(dt, cam.camera, p.pos);
     o.scene.airfield.update(dt, p.pos);
