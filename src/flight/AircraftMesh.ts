@@ -260,6 +260,13 @@ export function buildAircraft(id: AircraftId, opts: { girlPilot?: boolean } = {}
     addPair(exterior, plate([[0.5, -2.0], [5.5, 3.2], [5.5, 4.0], [3.0, 3.6], [0.5, 4.2]], 0.14, 0), hull);
     const flame = new THREE.Mesh(new THREE.ConeGeometry(0.3, 2.6, 10, 1, true), new THREE.MeshBasicMaterial({ color: 0xff8030, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
     flame.rotation.x = -Math.PI / 2; flame.position.set(0, 0, 5.4); exterior.add(flame); afterburners.push(flame);
+    // hostile identity: glowing red sensor eye, canted twin tails and underwing weapon pods
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), new THREE.MeshBasicMaterial({ color: 0xff2a1a })); eye.position.set(0, 0.12, -2.9); eye.scale.set(1.6, 0.7, 1); exterior.add(eye);
+    for (const sx of [-1, 1]) {
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.5, 1.3), hull); fin.position.set(sx * 0.8, 0.9, 3.0); fin.rotation.z = -sx * 0.4; fin.castShadow = true; exterior.add(fin);
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.3, 0.7), new THREE.MeshBasicMaterial({ color: 0xc01810 })); stripe.position.set(sx * 0.95, 1.45, 3.1); stripe.rotation.z = -sx * 0.4; exterior.add(stripe);
+      const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 2.2, 8), MAT.dark()); pod.rotation.x = Math.PI / 2; pod.position.set(sx * 2.4, -0.35, 0.6); exterior.add(pod);
+    }
     for (const [sx, col] of [[-1, 0xff2020], [1, 0xff5020]] as const) {
       const l = new THREE.Mesh(new THREE.SphereGeometry(0.1, 6, 6), new THREE.MeshBasicMaterial({ color: col })); l.position.set(sx * 5.4, 0.1, 3.6); exterior.add(l); navLights.push(l);
     }

@@ -17,6 +17,7 @@ import { HUD, type CameraView, type HudWarnings } from '../avionics/HUD';
 import { CameraRig, VIEW_LABEL } from './CameraRig';
 import { bindings, keyName } from './Bindings';
 import { Assists } from '../voice/Assists';
+import { VaporTrails } from '../flight/Vapor';
 import type { Cmd } from '../voice/CommandParser';
 import type { Input } from './Input';
 import type { SceneManager } from './SceneManager';
@@ -41,6 +42,7 @@ export interface SessionOptions {
 }
 
 /** One mission run: units, AI, weapons, director, camera/HUD feed. Destroyed completely when the mission ends or restarts. */
+const _hv = new THREE.Vector3();
 export class FlightSession {
   readonly player: Unit; readonly wingman: Unit; readonly drones: Unit[] = [];
   readonly units: Unit[] = [];
@@ -58,6 +60,7 @@ export class FlightSession {
   hintText: string | null = null; private hintT = 0; private hintLevel = 0;
   debug = false;
   private root = new THREE.Group();
+  private vapor = new VaporTrails(this.root);
   private accum = 0;
   private stepNo = 0;
   private wingCtl: FlightControls = { pitch: 0, roll: 0, yaw: 0, throttle: 0, airbrake: true, gearDown: true };
@@ -87,6 +90,8 @@ export class FlightSession {
     this.player = new Unit('ownship', route === 'A_BOY_SU57' ? 'Specter-1' : 'Specter-2', 'player', playerCfg, world, 101);
     this.wingman = new Unit('wingman', route === 'A_BOY_SU57' ? 'Specter-2' : 'Specter-1', 'friendly', wingCfg, world, 102);
     this.wingman.damageScale = 0.6;
+    const diff = o.settings.data.difficulty;
+    this.player.damageScale = diff === 'easy' ? 0.55 : diff === 'hard' ? 1.35 : 1;
     this.units.push(this.player, this.wingman);
     for (let i = 0; i < (o.missionId === 'm01' ? 2 : 0); i++) {
       const d = new Unit(i ? 'drone2' : 'drone1', i ? 'Wraith-2' : 'Wraith-1', 'hostile', DRONE, world, 110 + i);
@@ -119,7 +124,9 @@ export class FlightSession {
       const pts = [] as { x: number; z: number; alt: number }[];
       for (let z = z0; z >= -33500; z -= 3200) pts.push({ x: cxMain(z), z, alt: 3500 + i * 100 });
       for (let z = -33500; z <= z0; z += 3200) pts.push({ x: cxMain(z), z, alt: 3500 + i * 100 });
-      this.bandits.push(new BanditAI(d, pts, 7 + i, i === 0 ? 'ownship' : 'wingman'));
+      const bai = new BanditAI(d, pts, 7 + i, i === 0 ? 'ownship' : 'wingman');
+      bai.missileCooldown = diff === 'easy' ? 14 : diff === 'hard' ? 4 : 8; bai.cooldownScale = diff === 'easy' ? 1.4 : diff === 'hard' ? 0.7 : 1;
+      this.bandits.push(bai);
     }
     this.wireEvents();
     this.resetPositions();
@@ -561,8 +568,14 @@ export class FlightSession {
       v.cockpit.visible = cockpitView;
       v.exterior.visible = !cockpitView;
       if (u === this.player && v.pilotHead) v.pilotHead.visible = !cockpitView;
-      void dt;
+      if (v.pilotHead) {   // pilot looks into the turn, head sags under g, small idle scan
+        const right = _hv.set(1, 0, 0).applyQuaternion(m.q);
+        const gz = Math.max(-1, Math.min(1, (m.gLoad - 1) * 0.12));
+        v.pilotHead.rotation.y += ((right.y * 0.9) + Math.sin(t * 0.5 + u.id.length) * 0.12 - v.pilotHead.rotation.y) * Math.min(1, dt * 4);
+        v.pilotHead.rotation.x += (gz * 0.35 - v.pilotHead.rotation.x) * Math.min(1, dt * 4);
+      }
     }
+    this.vapor.update(this.units, dt);
   }
   private deadFx = new Set<Unit>();
 

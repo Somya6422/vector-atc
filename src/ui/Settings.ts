@@ -7,6 +7,7 @@ export interface SettingsData {
   quality: 'low' | 'medium' | 'high';
   invertPitch: boolean;
   metric: boolean;           // altitude in metres on the HUD
+  difficulty: 'easy' | 'normal' | 'hard';   // easy: tougher jet, slower enemies · hard: the opposite
   hintLevel: 0 | 1 | 2 | 3;  // 0 off, 1 subtle, 2 helpful, 3 direct
   debug: boolean;
   mouseGun: boolean;
@@ -17,7 +18,7 @@ export interface SettingsData {
 
 export const DEFAULT_SETTINGS: SettingsData = {
   master: 0.8, engines: 0.7, weapons: 0.8, dialogue: 0.9, radio: 0.8, music: 0.35, environment: 0.6,
-  voice: true, subtitleSize: 1, quality: 'medium', invertPitch: false, metric: false, hintLevel: 1, debug: false, mouseGun: true, mouseFlight: false, voiceAutoSend: true, voiceKeepFocus: false,
+  voice: true, subtitleSize: 1, quality: 'medium', difficulty: 'normal', invertPitch: false, metric: false, hintLevel: 1, debug: false, mouseGun: true, mouseFlight: false, voiceAutoSend: true, voiceKeepFocus: false,
 };
 const KEY = 'vantage-zero.settings.v1';
 
@@ -41,6 +42,7 @@ export class Settings {
     for (const k of ['voice', 'invertPitch', 'metric', 'debug', 'mouseGun', 'mouseFlight', 'voiceAutoSend', 'voiceKeepFocus'] as const) if (typeof r[k] === 'boolean') out[k] = r[k] as boolean;
     if (typeof r.subtitleSize === 'number') out.subtitleSize = Math.max(0.8, Math.min(1.6, r.subtitleSize));
     if (r.quality === 'low' || r.quality === 'medium' || r.quality === 'high') out.quality = r.quality;
+    if (r.difficulty === 'easy' || r.difficulty === 'normal' || r.difficulty === 'hard') out.difficulty = r.difficulty;
     if (r.hintLevel === 0 || r.hintLevel === 1 || r.hintLevel === 2 || r.hintLevel === 3) out.hintLevel = r.hintLevel;
     return out;
   }

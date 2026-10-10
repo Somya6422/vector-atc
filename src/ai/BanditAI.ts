@@ -31,6 +31,7 @@ export class BanditAI {
   detectTimer = 0;
   lockTimer = 0;
   missileCooldown = 8;
+  cooldownScale = 1;          // difficulty: >1 = slower to fire again
   breakReason = '';
   private wp = 0;
   private rng: Rng;
@@ -173,7 +174,7 @@ export class BanditAI {
     if (me.irMissiles > 0 && this.missileCooldown <= 0 && rng < MISSILES.IR.launchMaxRange * 0.85 && rng > 1200 && off < MISSILES.IR.lockCone && t.alive) {
       this.lockTimer += dt;
       if (this.lockTimer > 1.6 + this.rng.next()) {
-        ctx.weapons.launch(me, t, 'IR'); this.missileCooldown = 22; this.lockTimer = 0;
+        ctx.weapons.launch(me, t, 'IR'); this.missileCooldown = 22 * this.cooldownScale; this.lockTimer = 0;
         this.log.push(`launch IR at ${t.id}`);
       }
     } else this.lockTimer = Math.max(0, this.lockTimer - dt);
