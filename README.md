@@ -16,6 +16,13 @@ Browser game: **Vite + TypeScript + Three.js + Web Audio API**. Everything (terr
 | npm | 11.x |
 | Browser | Current Chrome / Edge / Firefox with WebGL2 (hardware acceleration on) |
 
+## Deployment (Vercel)
+
+- Live at **https://vantage-zero.vercel.app**. The Vercel project `vantage-zero` is connected to this GitHub repo, so every push to `main` deploys to production automatically.
+- Build settings are pinned in `vercel.json`: Vite, `npm ci`, `npm run build`, output `dist`. Models are cached for 7 days and hashed assets for a year.
+- Manual deploy from this folder: `vercel deploy --prod` (CLI logged in as the project owner).
+- Link preview: `public/og-image.jpg`, an in-game screenshot, is the Open Graph / Twitter card image and favicon.
+
 ## Install, run, build, test
 
 ```bash

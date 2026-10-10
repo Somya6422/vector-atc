@@ -62,5 +62,11 @@
     "Fly-by-wire auto-GCAS and AoA limiter not exercised in a recorded flight",
     "No human playtest of the new HUD, survival balance or neon tower collisions",
     "Frame-rate cost of the HUD canvas shadows and 900-instance city not measured on low-end hardware"
-  ]
+  ],
+  "deployment": {
+    "url": "https://vantage-zero.vercel.app",
+    "platform": "Vercel (project vantage-zero, Git-connected to Somya6422/Game-using-Wispr-Flow main)",
+    "config": "vercel.json",
+    "previewImage": "public/og-image.jpg"
+  }
 }
