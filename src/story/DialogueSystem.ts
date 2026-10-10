@@ -1,6 +1,6 @@
 import type { AudioEngine } from '../audio/AudioEngine';
 
-export type Speaker = 'Specter-1' | 'Specter-2' | 'Ground Control' | 'SYSTEM' | 'Nyx' | 'Narrator';
+export type Speaker = 'Specter-1' | 'Specter-2' | 'Ground Control' | 'SYSTEM' | 'Narrator';
 export interface Line {
   speaker: Speaker;
   text: string;
@@ -71,7 +71,7 @@ export class DialogueSystem {
     const n = this.queue.shift();
     if (!n) { this.current = null; this.onSubtitle?.(null); return; }
     const l = n.line;
-    const radio = l.radio ?? (l.speaker !== 'SYSTEM' && l.speaker !== 'Nyx' && l.speaker !== 'Narrator');
+    const radio = l.radio ?? (l.speaker !== 'SYSTEM' && l.speaker !== 'Narrator');
     const garbled = radio && this.interference > 0.35 && l.speaker === 'Specter-2' && (l.priority ?? 1) < 3;
     const total = DialogueSystem.duration(l.text);
     this.current = { speaker: l.speaker, text: garbled ? this.garble(l.text) : l.text, priority: l.priority ?? 1, total, remaining: total, radio, garbled };
@@ -120,6 +120,6 @@ export class DialogueSystem {
   }
   pause() { this.paused = true; this.speech?.pause?.(); }
   resume() { this.paused = false; this.speech?.resume?.(); }
-  clear() { this.queue.length = 0; this.current = null; this.speech?.cancel(); this.onSubtitle?.(null); this.lastKey.clear(); }
+  clear() { this.history.length = 0; this.queue.length = 0; this.current = null; this.speech?.cancel(); this.onSubtitle?.(null); this.lastKey.clear(); }
   get busy() { return !!this.current || this.queue.length > 0; }
 }

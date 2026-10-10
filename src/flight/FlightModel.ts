@@ -173,7 +173,7 @@ export class FlightModel {
     }
     this.stalled = aa > crit && V > 15;
     this.stallWarning = V > 15 && (aa > crit * 0.82 || (!this.onGround && this.iasKt < 112 && this.iasKt > 20));
-    const wave = 0.05 * smoothstep(0.85, 1.05, this.mach) * (1 - 0.5 * smoothstep(1.15, 1.6, this.mach));
+    const wave = 0.05 * (cfg.waveDrag ?? 1) * smoothstep(0.85, 1.05, this.mach) * (1 - 0.5 * smoothstep(1.15, 1.6, this.mach));
     const CD = cfg.CD0 + cfg.kInduced * CL * CL + wave + this.gearPos * cfg.gearDrag + this.airbrakePos * cfg.airbrakeDrag
       + (this.stalled ? 0.08 : 0);
 

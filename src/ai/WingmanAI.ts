@@ -78,6 +78,8 @@ export class WingmanAI {
   /** `2` Engage Target / Offensive */  commandEngage(t: Unit | null) { this.orderedState = 'ENGAGE'; this.target = t; if (this.canFight()) this.setState('ENGAGE', 'cmd 2'); }
   /** `3` Rejoin Formation */  commandRejoin() { this.orderedState = 'FORMATION'; this.target = null; this.setState('REJOIN', 'cmd 3'); }
   cycleFormation() { this.formation = FORMATIONS[(FORMATIONS.indexOf(this.formation) + 1) % FORMATIONS.length]; return this.formation; }
+  /** Return to base and land (ordered by the player). */
+  commandRtb() { this.orderedState = 'FORMATION'; this.target = null; if (this.canFight()) this.setState('RTB', 'cmd rtb'); }
   private canFight() { return this.state !== 'HOLD' && this.state !== 'TAKEOFF' && this.state !== 'RTB' && this.state !== 'LAND' && this.state !== 'PARKED'; }
 
   /** Slot position in world space, using her *perceived* leader position (degraded by interference). */

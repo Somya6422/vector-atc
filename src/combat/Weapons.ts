@@ -50,6 +50,7 @@ export class Weapons {
   readonly missiles: Missile[] = [];
   events: WeaponEvents = {};
   private bulletMesh: THREE.InstancedMesh;
+  private tracerGlow: THREE.InstancedMesh;
   private bp = new Float32Array(MAX_BULLETS * 3); private bv = new Float32Array(MAX_BULLETS * 3);
   private bl = new Float32Array(MAX_BULLETS); private bo: (Unit | null)[] = new Array(MAX_BULLETS).fill(null);
   private bn = 0;
@@ -68,10 +69,13 @@ export class Weapons {
   private clock = 0;
 
   constructor(private units: () => Unit[]) {
-    const geo = new THREE.BoxGeometry(0.12, 0.12, 7); geo.translate(0, 0, -3.5);
-    this.bulletMesh = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ color: 0xffd36a }), MAX_BULLETS);
+    const geo = new THREE.BoxGeometry(0.14, 0.14, 8); geo.translate(0, 0, -4);
+    this.bulletMesh = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ color: 0xfff1c0, toneMapped: false, fog: false }), MAX_BULLETS);
+    const gg = new THREE.BoxGeometry(0.55, 0.55, 12); gg.translate(0, 0, -6);
+    this.tracerGlow = new THREE.InstancedMesh(gg, new THREE.MeshBasicMaterial({ color: 0xff9a2e, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false }), MAX_BULLETS);
+    this.tracerGlow.count = 0; this.tracerGlow.frustumCulled = false; this.tracerGlow.instanceMatrix = this.bulletMesh.instanceMatrix;
     this.bulletMesh.count = 0; this.bulletMesh.frustumCulled = false;
-    this.group.add(this.bulletMesh);
+    this.group.add(this.bulletMesh, this.tracerGlow);
     for (let i = 0; i < MAX_FLARES; i++) {
       const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.flareTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
       s.visible = false; s.scale.setScalar(14); this.group.add(s);
@@ -233,7 +237,7 @@ export class Weapons {
       _m.compose(_b.set(this.bp[k * 3], this.bp[k * 3 + 1], this.bp[k * 3 + 2]), _q, _s);
       this.bulletMesh.setMatrixAt(k, _m);
     }
-    this.bulletMesh.count = this.bn;
+    this.bulletMesh.count = this.bn; this.tracerGlow.count = this.bn;
     this.bulletMesh.instanceMatrix.needsUpdate = true;
   }
 

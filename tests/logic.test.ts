@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { GameStateMachine } from '../src/game/GameState';
 import { SAVE_KEY, SaveManager, validateSave, type StorageLike } from '../src/persistence/SaveManager';
-import { NyxBrain } from '../src/characters/Nyx';
 import { Settings } from '../src/ui/Settings';
-import { buildAircraft, checkVisorInvariant, makeHelmet } from '../src/flight/AircraftMesh';
+import { buildAircraft, makeHelmet } from '../src/flight/AircraftMesh';
 import * as THREE from 'three';
 
 class MemStore implements StorageLike {
@@ -89,62 +88,14 @@ describe('Settings', () => {
   });
 });
 
-describe('Nyx companion state machine', () => {
-  const ctx = (boy: { x: number; z: number }, playerIsBoy = true) => ({ boy, player: boy, playerIsBoy, jacket: { x: 4, z: 3 } });
-  it('walks to the jacket and sleeps on it', () => {
-    const n = new NyxBrain({ x: 0, z: 0 });
-    for (let i = 0; i < 60 * 8; i++) n.update(1 / 60, ctx({ x: 30, z: 30 }));
-    expect(n.state).toBe('PERCH_JACKET');
-    expect(n.anim).toBe('sleep');
-    expect(Math.hypot(n.pos.x - 4, n.pos.z - 3)).toBeLessThan(0.4);
-    expect(n.purring).toBe(true);
-  });
-  it('recognises the boy: wakes, stretches and follows him (actual movement)', () => {
-    const n = new NyxBrain({ x: 4, z: 3 });
-    for (let i = 0; i < 60 * 2; i++) n.update(1 / 60, ctx({ x: 30, z: 30 }));
-    expect(n.anim).toBe('sleep');
-    const boy = { x: 5, z: 6 };
-    const seen = new Set<string>();
-    for (let i = 0; i < 60 * 12; i++) { n.update(1 / 60, ctx(boy)); seen.add(n.state); }
-    expect(seen.has('STRETCH_PAWS')).toBe(true);
-    expect(n.state).toBe('FOLLOW_ACTOR');
-    // boy walks away – cat follows
-    for (let i = 0; i < 60 * 10; i++) { boy.x += 0.02; boy.z += 0.01; n.update(1 / 60, ctx(boy)); }
-    expect(n.distanceTo(boy)).toBeLessThan(2.5);
-  });
-  it('F interaction changes state & movement; girl interaction still ends with Nyx following the boy', () => {
-    const n = new NyxBrain({ x: 4, z: 3 });
-    for (let i = 0; i < 60 * 2; i++) n.update(1 / 60, ctx({ x: 30, z: 30 }, false));
-    expect(n.state).toBe('PERCH_JACKET');
-    const msg = n.interact(false);
-    expect(msg).toMatch(/boy/);
-    expect(n.state).toBe('STRETCH_PAWS');
-    const boy = { x: 12, z: 3 };
-    for (let i = 0; i < 60 * 8; i++) n.update(1 / 60, ctx(boy, false));
-    expect(n.state).toBe('FOLLOW_ACTOR');
-    const n2 = new NyxBrain({ x: 4, z: 3 });
-    for (let i = 0; i < 60 * 2; i++) n2.update(1 / 60, ctx({ x: 40, z: 40 }));
-    n2.greetReturn();
-    expect(n2.state).toBe('STRETCH_PAWS');
-  });
-  it('is flagged protected', () => { expect(new NyxBrain({ x: 0, z: 0 }).isProtected).toBe(true); });
-});
-
-describe('visor invariant', () => {
-  it('girl helmet visor is closed, opaque, metallic 1 / roughness 0.05 / transmission 0', () => {
-    const h = makeHelmet(true);
-    const visor = h.getObjectByName('VISOR') as THREE.Mesh;
-    const m = visor.material as THREE.MeshPhysicalMaterial;
-    expect(m.metalness).toBe(1); expect(m.roughness).toBe(0.05); expect(m.transmission).toBe(0); expect(m.transparent).toBe(false); expect(m.opacity).toBe(1);
-    expect(checkVisorInvariant(h)).toEqual([]);
-  });
-  it('F-35 (girl) aircraft contains the girl helmet and passes the invariant; tampering is detected', () => {
-    const f = buildAircraft('F35');
-    let found = false; f.group.traverse(o => { if (o.userData.girlHelmet) found = true; });
-    expect(found).toBe(true);
-    expect(checkVisorInvariant(f.group)).toEqual([]);
-    const visor = f.group.getObjectByName('VISOR') as THREE.Mesh;
-    (visor.material as THREE.MeshPhysicalMaterial).transmission = 0.6;
-    expect(checkVisorInvariant(f.group).length).toBeGreaterThan(0);
+describe('pilot helmets', () => {
+  it('boy and girl have distinct coloured helmets and no mask or cat remains', () => {
+    const boy = makeHelmet(false), girl = makeHelmet(true);
+    const shell = (h: THREE.Group) => ((h.children[0] as THREE.Mesh).material as THREE.MeshStandardMaterial).color.getHex();
+    expect(shell(boy)).not.toBe(shell(girl));
+    expect(girl.getObjectByName('VISOR')).toBeUndefined();
+    const f = buildAircraft('F35'); let gold = false;
+    f.group.traverse(o => { if (o.userData.girlVisor || /GOLD|MIRROR/i.test(o.name)) gold = true; });
+    expect(gold).toBe(false);
   });
 });

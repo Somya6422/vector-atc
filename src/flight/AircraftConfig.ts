@@ -19,6 +19,8 @@ export interface AircraftConfig {
   CYbeta: number;          // side-force slope
   thrustMil: number;       // N, sea level static (total)
   thrustAB: number;        // N, with afterburner
+  /** transonic wave-drag scale (1 = default); the Su-57's area-ruled airframe and engines let it supercruise */
+  waveDrag?: number;
   spool: number;           // 1/s engine response
   fuelFlowMil: number;     // kg/s
   fuelFlowAB: number;
@@ -57,7 +59,7 @@ export const SU57: AircraftConfig = {
   id: 'SU57', name: 'Su-57 Felon', emptyMass: 18500, fuelCapacity: 3200, wingArea: 78, wingspan: 14.1, length: 20.1,
   CL0: 0.06, CLalpha: 4.3, alphaCrit: 22 * Math.PI / 180, alphaCritNeg: 14 * Math.PI / 180,
   CD0: 0.021, kInduced: 0.115, CYbeta: 1.3,
-  thrustMil: 190000, thrustAB: 310000, spool: 1.6, fuelFlowMil: 1.5, fuelFlowAB: 5.2,
+  waveDrag: 0.45, thrustMil: 190000, thrustAB: 310000, spool: 1.6, fuelFlowMil: 1.5, fuelFlowAB: 5.2,
   maxPitchRate: 1.15, maxRollRate: 3.4, maxYawRate: 0.75, pitchResponse: 5.5, rollResponse: 6.5, yawResponse: 3.5,
   gLimit: 9, gLimitNeg: 3.5, vectoringAuthority: 0.62,
   gearHeight: 2.3, bellyHeight: 1.1, gearDrag: 0.028, airbrakeDrag: 0.065,
@@ -70,7 +72,7 @@ export const F35: AircraftConfig = {
   id: 'F35', name: 'F-35 Lightning II', emptyMass: 13300, fuelCapacity: 2500, wingArea: 42.7, wingspan: 10.7, length: 15.7,
   CL0: 0.07, CLalpha: 4.0, alphaCrit: 22 * Math.PI / 180, alphaCritNeg: 12 * Math.PI / 180,
   CD0: 0.024, kInduced: 0.14, CYbeta: 1.2,
-  thrustMil: 125000, thrustAB: 190000, spool: 1.2, fuelFlowMil: 1.1, fuelFlowAB: 4.0,
+  waveDrag: 1.15, thrustMil: 125000, thrustAB: 190000, spool: 1.2, fuelFlowMil: 1.1, fuelFlowAB: 4.0,
   maxPitchRate: 0.95, maxRollRate: 3.0, maxYawRate: 0.55, pitchResponse: 4.2, rollResponse: 5.2, yawResponse: 3.0,
   gLimit: 9, gLimitNeg: 3, vectoringAuthority: 0.1,
   gearHeight: 2.0, bellyHeight: 1.0, gearDrag: 0.03, airbrakeDrag: 0.06,

@@ -1,3 +1,4 @@
+import { AIRCRAFT } from './AircraftConfig';
 import * as THREE from 'three';
 import { getModel } from './ModelCache';
 import type { AircraftId } from './AircraftConfig';
@@ -51,55 +52,70 @@ export function plate(points: [number, number][], thick: number, y = 0): THREE.B
   return g;
 }
 
+/** Subtle panel seams in object space (the supplied meshes have no UVs): fine transverse and longitudinal lines that darken the paint. */
+function withPanelSeams<T extends THREE.MeshStandardMaterial>(mat: T, scaleZ = 2.2, scaleX = 1.7): T {
+  mat.onBeforeCompile = sh => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vObjP;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvObjP = position;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vObjP;\nfloat seam(float v, float s){ float q = abs(fract(v / s - 0.5) - 0.5) * s; return 1.0 - smoothstep(0.0, max(fwidth(v) * 1.4, 1e-4), q); }')
+      .replace('#include <color_fragment>', '#include <color_fragment>\n float sm = max(seam(vObjP.z, ' + scaleZ.toFixed(2) + ') * 0.9, seam(vObjP.x, ' + scaleX.toFixed(2) + ') * 0.6); diffuseColor.rgb *= 1.0 - 0.22 * sm;');
+  };
+  mat.customProgramCacheKey = () => 'seams' + scaleZ + scaleX;
+  return mat;
+}
+const paint = (color: number, metalness: number, roughness: number, clearcoat = 0.6) => withPanelSeams(new THREE.MeshPhysicalMaterial({ color, metalness, roughness, clearcoat, clearcoatRoughness: 0.28, envMapIntensity: 1.15 }));
+
+/** Soft radial glow for the exhaust bloom sprites (plain texture headless). */
+function glowTex(): THREE.Texture {
+  if (typeof document === 'undefined') return new THREE.Texture();
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d')!, gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.25, 'rgba(255,200,140,0.75)'); gr.addColorStop(1, 'rgba(255,120,40,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+}
+
 export const MAT = {
-  hullSu: () => new THREE.MeshStandardMaterial({ color: 0x6f7885, metalness: 0.55, roughness: 0.42 }),
-  hullF35: () => new THREE.MeshStandardMaterial({ color: 0x80868f, metalness: 0.45, roughness: 0.5 }),
-  hullDrone: () => new THREE.MeshStandardMaterial({ color: 0x23262c, metalness: 0.3, roughness: 0.65 }),
+  hullSu: () => paint(0x6f7885, 0.55, 0.4),
+  hullF35: () => paint(0x7c828b, 0.15, 0.72, 0.12),   // radar-absorbent matte
+  hullDrone: () => paint(0x23262c, 0.3, 0.6),
   dark: () => new THREE.MeshStandardMaterial({ color: 0x15171b, metalness: 0.4, roughness: 0.55 }),
-  canopy: () => new THREE.MeshStandardMaterial({ color: 0x2a3a4a, metalness: 0.9, roughness: 0.08, transparent: true, opacity: 0.38 }),
+  canopy: () => new THREE.MeshPhysicalMaterial({ color: 0x2a3a4a, metalness: 0.15, roughness: 0.03, transparent: true, opacity: 0.55, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 2.2 }),
   nozzle: () => new THREE.MeshStandardMaterial({ color: 0x3a3028, metalness: 0.8, roughness: 0.45 }),
 };
 
-/** The mirrored gold visor material – the girl's face must never be visible (metal 1, rough 0.05, no transmission). */
-export function visorMaterial() {
-  const m = new THREE.MeshPhysicalMaterial({ color: 0xd8a437, metalness: 1.0, roughness: 0.05, transmission: 0.0, transparent: false, opacity: 1, side: THREE.FrontSide });
-  m.name = 'GIRL_VISOR_MIRROR_GOLD';
-  return m;
-}
-
-/**
- * Helmet. For the girl, the visor is a *closed, opaque, mirrored* shell that wraps the whole front/face area; no head,
- * face, or eye geometry exists inside the helmet at all (nothing to reveal even if the shell were removed).
- */
+/** Flight helmet. Boy: orange shell; girl: teal shell with a white stripe. Both wear a standard tinted flight visor. */
 export function makeHelmet(girl: boolean, scale = 1): THREE.Group {
   const g = new THREE.Group();
   g.name = girl ? 'HELMET_GIRL' : 'HELMET_BOY';
   const shell = new THREE.Mesh(new THREE.SphereGeometry(0.15 * scale, 24, 18),
-    new THREE.MeshStandardMaterial({ color: girl ? 0xe9eaee : 0x32404a, metalness: 0.2, roughness: 0.35 }));
+    new THREE.MeshStandardMaterial({ color: girl ? 0x1fa3a8 : 0xe0702a, metalness: 0.2, roughness: 0.35 }));
   g.add(shell);
-  if (girl) {
-    // full face-covering visor: front hemisphere, slightly larger than the shell, fully closed
-    const visor = new THREE.Mesh(new THREE.SphereGeometry(0.158 * scale, 24, 16, -Math.PI * 0.62, Math.PI * 1.24, Math.PI * 0.2, Math.PI * 0.62), visorMaterial());
-    visor.rotation.y = Math.PI; // faces -Z (forward)
-    visor.name = 'VISOR';
-    visor.userData.girlVisor = true;
-    g.add(visor);
-    g.userData.girlHelmet = true;
-    // chin/neck seal so the lower face is never exposed either
-    const chin = new THREE.Mesh(new THREE.SphereGeometry(0.152 * scale, 16, 10, 0, Math.PI * 2, Math.PI * 0.78, Math.PI * 0.22), new THREE.MeshStandardMaterial({ color: 0xcfd1d6, metalness: 0.2, roughness: 0.4 }));
-    g.add(chin);
-  } else {
-    const visor = new THREE.Mesh(new THREE.SphereGeometry(0.156 * scale, 20, 12, 0, Math.PI * 2, Math.PI * 0.28, Math.PI * 0.3),
-      new THREE.MeshStandardMaterial({ color: 0x101820, metalness: 0.9, roughness: 0.15 }));
-    visor.rotation.y = Math.PI; visor.rotation.x = -0.15;
-    g.add(visor);
-  }
+  const stripe = new THREE.Mesh(new THREE.SphereGeometry(0.152 * scale, 24, 4, 0, Math.PI * 2, Math.PI * 0.08, Math.PI * 0.06), new THREE.MeshStandardMaterial({ color: 0xf2f4f6, roughness: 0.5 }));
+  g.add(stripe);
+  const visor = new THREE.Mesh(new THREE.SphereGeometry(0.156 * scale, 20, 12, 0, Math.PI * 2, Math.PI * 0.28, Math.PI * 0.3),
+    new THREE.MeshStandardMaterial({ color: girl ? 0x16303a : 0x101820, metalness: 0.9, roughness: 0.15 }));
+  visor.rotation.y = Math.PI; visor.rotation.x = -0.15;
+  g.add(visor);
   return g;
 }
 
 export interface AircraftVisual {
   group: THREE.Group;
   afterburners: THREE.Mesh[];
+  /** under-wing missiles (hidden as they are fired) and the anti-collision strobes */
+  stores: THREE.Object3D[];
+  strobes: THREE.Mesh[];
+  /** additive exhaust glow (afterburner bloom) at each nozzle */
+  glows: THREE.Sprite[];
+  /** transonic vapour cone (shown near Mach 1) */
+  vaporCone: THREE.Mesh;
+  /** internal weapons-bay doors (hinged groups, rotate on launch) */
+  bayDoors: THREE.Group[];
+  /** afterburner shock diamonds (Mach disks) along each exhaust */
+  diamonds: THREE.Sprite[];
+  /** STOVL lift-fan / swivel-nozzle plumes (F-35) */
+  liftPlumes: THREE.Sprite[];
   navLights: THREE.Mesh[];
   cockpit: THREE.Group;       // interior – shown only in cockpit view
   exterior: THREE.Group;      // everything else
@@ -180,7 +196,7 @@ export function buildAircraft(id: AircraftId, opts: { girlPilot?: boolean } = {}
       flame.rotation.x = -Math.PI / 2; flame.position.set(x, su ? -0.2 : 0, tailZ + 2.4); exterior.add(flame); afterburners.push(flame);
     }
     cockpitEyeY = 1.0; cockpitZ = su ? -4.2 : -3.3;
-    // pilot helmet sits in the cockpit (the Su-57 pilot = boy, the F-35 pilot = girl with a permanently closed gold visor)
+    // pilot helmet sits in the cockpit (the Su-57 pilot = boy in orange, the F-35 pilot = girl in teal)
     const ph = makeHelmet(!su, 1); ph.position.set(0, 0.95, su ? -4.1 : -3.1); exterior.add(ph); pilotHead = ph;
     if (su) addGear([-6, 2.2], [1.7, 1.0, 2.2]); else addGear([-4.6, 2.0], [1.5, 1.0, 1.0]);
     for (const [sx, col] of [[-1, 0xff2020], [1, 0x20ff40]] as const) {
@@ -245,7 +261,6 @@ export function buildAircraft(id: AircraftId, opts: { girlPilot?: boolean } = {}
     const can = new THREE.Mesh(new THREE.SphereGeometry(0.55, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), MAT.canopy());
     can.scale.set(1, 0.85, 3.1); can.position.set(0, 0.8, -3.4); exterior.add(can);
     cockpitEyeY = 1.0; cockpitZ = -3.3;
-    // GIRL: closed gold-mirrored visor, always
     const ph = makeHelmet(true, 1); ph.position.set(0, 0.95, -3.1); exterior.add(ph); pilotHead = ph;
     const eots = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.15, 0.5), new THREE.MeshStandardMaterial({ color: 0x1b2a3a, metalness: 0.9, roughness: 0.1 })); eots.position.set(0, -0.9, -4.8); exterior.add(eots);
     const ab = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.05, 1.2), MAT.dark()); ab.position.set(0, 0.95, 1.6); exterior.add(ab); airbrakes.push(ab);
@@ -260,9 +275,64 @@ export function buildAircraft(id: AircraftId, opts: { girlPilot?: boolean } = {}
     addPair(exterior, plate([[0.5, -2.0], [5.5, 3.2], [5.5, 4.0], [3.0, 3.6], [0.5, 4.2]], 0.14, 0), hull);
     const flame = new THREE.Mesh(new THREE.ConeGeometry(0.3, 2.6, 10, 1, true), new THREE.MeshBasicMaterial({ color: 0xff8030, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
     flame.rotation.x = -Math.PI / 2; flame.position.set(0, 0, 5.4); exterior.add(flame); afterburners.push(flame);
+    // hostile identity: glowing red sensor eye, canted twin tails and underwing weapon pods
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), new THREE.MeshBasicMaterial({ color: 0xff2a1a })); eye.position.set(0, 0.12, -2.9); eye.scale.set(1.6, 0.7, 1); exterior.add(eye);
+    for (const sx of [-1, 1]) {
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.5, 1.3), hull); fin.position.set(sx * 0.8, 0.9, 3.0); fin.rotation.z = -sx * 0.4; fin.castShadow = true; exterior.add(fin);
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.3, 0.7), new THREE.MeshBasicMaterial({ color: 0xc01810 })); stripe.position.set(sx * 0.95, 1.45, 3.1); stripe.rotation.z = -sx * 0.4; exterior.add(stripe);
+      const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 2.2, 8), MAT.dark()); pod.rotation.x = Math.PI / 2; pod.position.set(sx * 2.4, -0.35, 0.6); exterior.add(pod);
+    }
     for (const [sx, col] of [[-1, 0xff2020], [1, 0xff5020]] as const) {
       const l = new THREE.Mesh(new THREE.SphereGeometry(0.1, 6, 6), new THREE.MeshBasicMaterial({ color: col })); l.position.set(sx * 5.4, 0.1, 3.6); exterior.add(l); navLights.push(l);
     }
+  }
+  // ---- shared detail pass: squadron colours, weapon pylons + missiles, strobes, hot exhaust core ----
+  const cfgD = AIRCRAFT[id], half = cfgD.wingspan * 0.5, accent = id === 'SU57' ? 0xe0702a : id === 'F35' ? 0x1fa3a8 : 0xc01810;
+  const accentMat = new THREE.MeshStandardMaterial({ color: accent, roughness: 0.5, metalness: 0.2 });
+  const stores: THREE.Object3D[] = [], strobes: THREE.Mesh[] = [];
+  for (const sx of [-1, 1]) {
+    const tip = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.06, 1.6), accentMat); tip.position.set(sx * (half - 0.35), 0.12, cfgD.length * 0.17); exterior.add(tip);
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.05, 0.35), accentMat); stripe.position.set(sx * (half * 0.55), 0.14, cfgD.length * 0.2); exterior.add(stripe);
+    for (const k of [0.3, 0.46]) {
+      const grp = new THREE.Group(); grp.position.set(sx * half * k, -0.42, cfgD.length * 0.1);
+      const pylon = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.28, 1.1), MAT.dark()); pylon.position.y = 0.1; grp.add(pylon);
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 2.6, 8), new THREE.MeshStandardMaterial({ color: 0xdfe3e6, roughness: 0.4 })); body.rotation.x = Math.PI / 2; body.position.y = -0.18; grp.add(body);
+      const nose = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.5, 8), new THREE.MeshStandardMaterial({ color: 0xb02820, roughness: 0.5 })); nose.rotation.x = -Math.PI / 2; nose.position.set(0, -0.18, -1.55); grp.add(nose);
+      for (let i = 0; i < 4; i++) { const fin = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.28, 0.4), MAT.dark()); fin.position.set(0, -0.18, 1.1); fin.rotation.z = i * Math.PI / 2; grp.add(fin); }
+      grp.visible = false; exterior.add(grp); stores.push(grp);   // carried internally (stealth): only seen as the bay opens
+    }
+  }
+  for (const sx of [-1, 1]) { const s = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffffff })); s.position.set(sx * (id === 'DRONE' ? 0.8 : 1.9), id === 'DRONE' ? 1.6 : 2.9, cfgD.length * 0.36); exterior.add(s); strobes.push(s); }
+  const glows: THREE.Sprite[] = [];
+  const glowMat = new THREE.SpriteMaterial({ map: glowTex(), color: 0xffb070, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, toneMapped: false, opacity: 0 });
+  for (const f of afterburners) {
+    const gs = new THREE.Sprite(glowMat.clone()); const h = (f.geometry as THREE.ConeGeometry).parameters.height;
+    gs.position.set(f.position.x, f.position.y, f.position.z - h * 0.45); gs.scale.setScalar(2); exterior.add(gs); glows.push(gs);
+  }
+  const diamonds: THREE.Sprite[] = [];
+  for (const f of afterburners) {
+    const h = (f.geometry as THREE.ConeGeometry).parameters.height;
+    for (let i = 0; i < 4; i++) {
+      const d = new THREE.Sprite(glowMat.clone()); (d.material as THREE.SpriteMaterial).color.set(0xffe0b0);
+      d.position.set(f.position.x, f.position.y, f.position.z - h * 0.35 + 1.1 + i * 1.25); d.scale.setScalar(0.9 - i * 0.14); d.visible = false; exterior.add(d); diamonds.push(d);
+    }
+  }
+  // weapons-bay doors under the fuselage, hinged on their outer edges
+  const bayDoors: THREE.Group[] = [];
+  if (id !== 'DRONE') for (const sx of [-1, 1]) {
+    const hinge = new THREE.Group(); hinge.position.set(sx * 0.62, -0.62, cfgD.length * 0.04);
+    const door = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.04, cfgD.length * 0.28), hull); door.position.x = -sx * 0.29; hinge.add(door);
+    exterior.add(hinge); bayDoors.push(hinge);
+  }
+  const liftPlumes: THREE.Sprite[] = [];
+  if (id === 'F35') for (const z of [-cfgD.length * 0.2, cfgD.length * 0.36]) {
+    const lp = new THREE.Sprite(glowMat.clone()); (lp.material as THREE.SpriteMaterial).color.set(0xbfd6ff); lp.position.set(0, -1.6, z); lp.scale.set(2.2, 4.5, 1); lp.visible = false; exterior.add(lp); liftPlumes.push(lp);
+  }
+  const vaporCone = new THREE.Mesh(new THREE.ConeGeometry(cfgD.wingspan * 0.42, cfgD.length * 0.55, 28, 1, true), new THREE.MeshBasicMaterial({ color: 0xf4f8ff, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+  vaporCone.rotation.x = -Math.PI / 2; vaporCone.position.z = cfgD.length * 0.08; vaporCone.visible = false; exterior.add(vaporCone);
+  for (const f of [...afterburners]) {   // bright inner core so the afterburner reads as hot white-orange
+    const core = new THREE.Mesh(new THREE.ConeGeometry((f.geometry as THREE.ConeGeometry).parameters.radius * 0.45, (f.geometry as THREE.ConeGeometry).parameters.height * 0.7, 10, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff2d0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+    core.rotation.copy(f.rotation); core.position.copy(f.position); core.position.z -= (f.geometry as THREE.ConeGeometry).parameters.height * 0.1; exterior.add(core); afterburners.push(core);
   }
   const girl = opts.girlPilot ?? id === 'F35';
   const cockpit = id === 'DRONE' ? new THREE.Group() : buildCockpit(cockpitZ, cockpitEyeY, girl);
@@ -271,24 +341,7 @@ export function buildAircraft(id: AircraftId, opts: { girlPilot?: boolean } = {}
   gear.visible = true;
   const hullRef = hull;
   return {
-    group, afterburners, navLights, cockpit, exterior, pilotHead, gear, airbrakes,
+    group, afterburners, stores, strobes, glows, vaporCone, bayDoors, diamonds, liftPlumes, navLights, cockpit, exterior, pilotHead, gear, airbrakes,
     setLivery(color: number) { hullRef.color.setHex(color); },
   };
-}
-
-/** Walks a scene graph and asserts the girl's face concealment invariant. Returns violations (empty = OK). */
-export function checkVisorInvariant(root: THREE.Object3D): string[] {
-  const problems: string[] = [];
-  root.traverse(o => {
-    if (o.userData.girlHelmet) {
-      const visor = o.getObjectByName('VISOR') as THREE.Mesh | undefined;
-      if (!visor) { problems.push(`${o.name}: visor missing`); return; }
-      const m = visor.material as THREE.MeshPhysicalMaterial;
-      if (m.metalness !== 1 || m.roughness > 0.05 + 1e-9 || m.transmission !== 0 || m.transparent || m.opacity !== 1 || !visor.visible || !o.visible)
-        problems.push(`${o.name}: visor material/visibility violates invariant`);
-      o.traverse(c => { if (/face|eye|head_bare|skin/i.test(c.name)) problems.push(`${o.name}: forbidden face mesh ${c.name}`); });
-    }
-    if (/^FACE|GIRL_FACE|GIRL_SKIN/i.test(o.name)) problems.push(`forbidden mesh ${o.name}`);
-  });
-  return problems;
 }

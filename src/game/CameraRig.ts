@@ -4,14 +4,19 @@ import type { CameraView } from '../avionics/HUD';
 import { Rng, clamp, lerp } from '../util/math';
 
 const _f = new THREE.Vector3(), _u = new THREE.Vector3(), _p = new THREE.Vector3(), _t = new THREE.Vector3(), _q = new THREE.Quaternion(), _m = new THREE.Matrix4(), _r = new THREE.Vector3();
-export const VIEWS: CameraView[] = ['chase', 'cockpit', 'wing', 'orbit', 'front', 'flyby'];
-export const VIEW_LABEL: Record<CameraView, string> = { chase: 'CHASE', cockpit: 'COCKPIT', wing: 'WING (side)', orbit: 'ORBIT', front: 'FRONT (looking back)', flyby: 'FLYBY' };
+export const VIEWS: CameraView[] = ['chase', 'cockpit', 'wing', 'tail', 'orbit', 'front', 'target', 'tactical', 'tower', 'cinematic', 'flyby'];
+export const VIEW_LABEL: Record<CameraView, string> = { chase: 'CHASE', cockpit: 'COCKPIT', wing: 'WING (side)', orbit: 'ORBIT', front: 'FRONT (looking back)', flyby: 'FLYBY', tail: 'TAIL (low, rear)', target: 'TARGET (lock-on)', tactical: 'TACTICAL (overhead)', tower: 'TOWER', cinematic: 'CINEMATIC' };
 
 /** Chase (velocity-aware, lagged), cockpit (eye point + head-look) and flyby (spectator) cameras. */
 export class CameraRig {
   readonly camera = new THREE.PerspectiveCamera(62, 1, 0.3, 90000);
   view: CameraView = 'chase';
   freeLook = false;
+  /** world position of the selected target (set by the flight session) for the TARGET view */
+  focus: THREE.Vector3 | null = null;
+  /** control tower position for the TOWER view */
+  towerPos = new THREE.Vector3(120, 380, 900);
+  private cineA = 0;
   private pos = new THREE.Vector3();
   private offset = new THREE.Vector3();
   private orbitA = 0;
@@ -26,13 +31,19 @@ export class CameraRig {
   private initialized = false;
   private tmpQuat = new THREE.Quaternion();
 
-  cycle() { this.view = VIEWS[(VIEWS.indexOf(this.view) + 1) % VIEWS.length]; this.flybyTimer = 0; this.flybyBlend = 0; return this.view; }
+  cycle() {
+    let v = VIEWS[(VIEWS.indexOf(this.view) + 1) % VIEWS.length];
+    if (v === 'tower' && !this.towerOk) v = VIEWS[(VIEWS.indexOf(v) + 1) % VIEWS.length];
+    this.view = v; this.flybyTimer = 0; this.flybyBlend = 0; return this.view;
+  }
+  private towerOk = true;
   setView(v: CameraView) { this.view = v; this.flybyTimer = 0; }
   resize(w: number, h: number) { this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); }
   snap() { this.initialized = false; }
 
   update(dt: number, p: Unit, mouseDX: number, mouseDY: number) {
     const m = p.model, cam = this.camera;
+    this.towerOk = Math.hypot(m.pos.x - this.towerPos.x, m.pos.z - this.towerPos.z) < 7000;
     // head-look
     if (this.freeLook) {
       this.yawOff = clamp(this.yawOff - mouseDX * 0.004, -2.4, 2.4);
@@ -95,6 +106,31 @@ export class CameraRig {
       cam.position.copy(m.pos).add(this.offset);
       _u.set(0, 1, 0).applyQuaternion(m.q); this.lookUp.lerp(this.view === 'orbit' ? _t.set(0, 1, 0) : _u, 1 - Math.exp(-dt * 2)).normalize();
       _m.lookAt(cam.position, m.pos, this.lookUp); cam.quaternion.setFromRotationMatrix(_m);
+      this.lastView = this.view; this.initialized = true;
+      return;
+    }
+    if (this.view === 'tail' || this.view === 'tactical' || this.view === 'target' || this.view === 'cinematic' || this.view === 'tower') {
+      let desired: THREE.Vector3; let look = _t.copy(m.pos);
+      _u.set(0, 1, 0).applyQuaternion(m.q);
+      if (this.view === 'tail') desired = new THREE.Vector3(0, 1.8 + p.cfg.length * 0.06, p.cfg.length * 0.6 + 13).applyQuaternion(m.q);
+      else if (this.view === 'tactical') desired = new THREE.Vector3(0, 520, 60);
+      else if (this.view === 'cinematic') { this.cineA += dt * 0.12; desired = new THREE.Vector3(Math.cos(this.cineA) * 70, 4 + Math.sin(this.cineA * 1.7) * 12, Math.sin(this.cineA) * 70).applyQuaternion(this.tmpQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(-m.vel.x, -m.vel.z))); }
+      else if (this.view === 'target') {
+        m.forward(_f);
+        if (this.focus) { const toT = new THREE.Vector3().copy(this.focus).sub(m.pos); const d = toT.length(); toT.normalize(); desired = new THREE.Vector3().copy(toT).multiplyScalar(-36).add(new THREE.Vector3(0, 9, 0)); look = _t.copy(m.pos).addScaledVector(toT, Math.min(d * 0.5, 700)); }
+        else desired = new THREE.Vector3().copy(_f).multiplyScalar(-34).add(new THREE.Vector3(12, 9, 0));
+      } else {                                                    // tower: fixed vantage that follows the jet while it is near the field
+        const nearField = this.towerOk = Math.hypot(m.pos.x - this.towerPos.x, m.pos.z - this.towerPos.z) < 7000;
+        if (!nearField) { this.view = 'chase'; return; }
+        desired = new THREE.Vector3().copy(this.towerPos).sub(m.pos);
+      }
+      if (!this.initialized || this.lastView !== this.view) this.offset.copy(desired);
+      this.offset.lerp(desired, 1 - Math.exp(-dt * (this.view === 'tower' ? 30 : this.view === 'tactical' ? 3 : 4)));
+      cam.position.copy(m.pos).add(this.offset);
+      this.lookUp.set(0, 1, 0);
+      if (this.view === 'tactical') { this.lookUp.set(0, 0, -1); }
+      _m.lookAt(cam.position, look, this.lookUp); cam.quaternion.setFromRotationMatrix(_m);
+      this.addShake(this.view === 'tail' ? shakeAmt : 0);
       this.lastView = this.view; this.initialized = true;
       return;
     }

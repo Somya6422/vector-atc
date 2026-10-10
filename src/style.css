@@ -104,3 +104,46 @@ body[data-state="DEBRIEFING"] #subtitle, body[data-state="MISSION_FAILED"] #subt
 #voice .vheard { color: var(--c); } #voice .vfb { color: var(--g); } #voice .vfb.bad { color: var(--a); }
 #voice .vhint { text-align: center; font-size: 11px; opacity: .55; margin-top: 3px; }
 #voice .vlog > div { background: rgba(0,0,0,.45); padding: 1px 8px; }
+#pilotbar { position: absolute; left: 50%; transform: translateX(-50%); bottom: 62px; z-index: 9; font-family: Consolas, "Courier New", monospace; max-width: min(940px, 74vw); }
+#pilotbar .pbbtn { padding: 5px 8px; font-size: 11px; }
+#pilotbar .pbrow { justify-content: center; }
+#pilotbar .pbstep { text-align: center; }
+#pilotbar .pbstep { background: rgba(6,16,22,.78); border: 1px solid var(--line); border-left: 3px solid var(--a); border-radius: 6px; padding: 7px 10px; margin-bottom: 6px; color: #e8f4ff; font-size: 13px; line-height: 1.35; }
+#pilotbar .pbrow { display: flex; flex-wrap: wrap; gap: 6px; }
+#pilotbar .pbbtn { background: rgba(6,16,22,.8); color: #cfe8e0; border: 1px solid var(--line); border-radius: 5px; padding: 6px 10px; font: inherit; font-size: 12px; letter-spacing: .04em; cursor: pointer; }
+#pilotbar .pbbtn:hover { border-color: var(--a); color: #fff; }
+#pilotbar .pbbtn.hot { border-color: var(--a); color: var(--a); box-shadow: 0 0 10px rgba(255,195,77,.3); }
+#pilotbar .pbbtn.on { background: rgba(255,195,77,.22); color: #fff; border-color: var(--a); }
+#quickguide { position: absolute; inset: 0; z-index: 30; background: rgba(0,6,10,.72); align-items: center; justify-content: center; }
+#quickguide .qgcard { background: rgba(8,20,28,.96); border: 1px solid var(--a); border-radius: 10px; padding: 22px 26px; max-width: 560px; color: #e8f4ff; font-family: Consolas, "Courier New", monospace; font-size: 14px; line-height: 1.5; }
+#quickguide h2 { margin: 0 0 10px; color: var(--a); font-size: 18px; }
+#quickguide ol { padding-left: 20px; margin: 0 0 10px; }
+#quickguide li { margin-bottom: 6px; }
+#quickguide .qgclose { background: var(--a); color: #101820; border: 0; border-radius: 5px; padding: 8px 18px; font: inherit; font-weight: bold; cursor: pointer; }
+
+#actiondial { position: absolute; inset: 0; z-index: 28; background: radial-gradient(circle, rgba(0,10,14,.55) 0, rgba(0,10,14,.25) 60%, transparent 75%); align-items: center; justify-content: center; }
+#actiondial .adring { position: relative; width: 420px; height: 420px; max-width: 92vw; max-height: 92vw; border-radius: 50%; border: 1px solid var(--line); }
+#actiondial .adbtn, #actiondial .adclose { position: absolute; transform: translate(-50%, -50%); background: rgba(6,16,22,.9); color: #e8f4ff; border: 1px solid var(--a); border-radius: 22px; padding: 12px 14px; min-width: 112px; font: 12px Consolas, "Courier New", monospace; letter-spacing: .05em; cursor: pointer; }
+#actiondial .adbtn:hover, #actiondial .adbtn:focus-visible { background: rgba(255,195,77,.25); outline: none; }
+#actiondial .adclose { left: 50%; top: 50%; border-color: var(--line); color: #9fc; }
+#squadbtns { position: absolute; z-index: 9; display: flex; gap: 4px; }
+#squadbtns button { flex: 1; background: rgba(6,16,22,.8); color: #7fe3ff; border: 1px solid var(--line); border-radius: 4px; padding: 5px 0; font: 11px Consolas, monospace; cursor: pointer; }
+#squadbtns button:hover { border-color: #7fe3ff; color: #fff; }
+body[data-state="TAKEOFF"] #subtitle, body[data-state="ACTIVE_MISSION"] #subtitle { bottom: 150px; }
+
+#commands { position: absolute; inset: 0; z-index: 32; background: rgba(0,6,10,.8); align-items: center; justify-content: center; }
+#commands .ccard { width: min(1180px, 96vw); max-height: 92vh; overflow: auto; background: rgba(8,20,28,.97); border: 1px solid var(--a); border-radius: 10px; padding: 16px 22px; color: #e8f4ff; font: 13px Consolas, "Courier New", monospace; }
+#commands .chead { display: flex; justify-content: space-between; align-items: center; }
+#commands .chead h2 { margin: 0; color: var(--a); font-size: 18px; }
+#commands .ccols { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 22px; }
+@media (max-width: 900px) { #commands .ccols { grid-template-columns: 1fr; } }
+#commands .csec { color: var(--c); font-size: 15px; margin: 12px 0 4px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+#commands h3 { color: var(--g); font-size: 12px; margin: 10px 0 3px; letter-spacing: .08em; text-transform: uppercase; }
+#commands table { border-collapse: collapse; width: 100%; }
+#commands td { padding: 2px 6px 2px 0; vertical-align: top; }
+#commands .ck { color: var(--a); white-space: nowrap; width: 1%; }
+#commands .cn { color: #8fb0a8; font-size: 11px; }
+#commands .cs { margin: 0 0 10px; } #commands .cs p { margin: 2px 0 0; color: #c9dcd6; }
+#commands .cw { color: var(--c); font-size: 11px; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
+#commands .cv { color: #c9dcd6; margin: 0; line-height: 1.6; }
+#commands .cclose { background: var(--a); color: #101820; border: 0; border-radius: 5px; padding: 6px 14px; font: inherit; font-weight: bold; cursor: pointer; }

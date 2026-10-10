@@ -9,7 +9,6 @@ export interface SaveData {
   unlocked: string[];          // cosmetics / missions
   livery: string;
   relationship: number;        // 0..100 trust between Specter-1 and Specter-2
-  nyxBond: number;             // 0..100
   flags: Record<string, boolean>;
   savedAt: number;
 }
@@ -19,7 +18,7 @@ export const SAVE_KEY = 'vantage-zero.save.v1';
 const GRADES: Grade[] = ['S', 'A', 'B', 'C', 'D', 'F'];
 
 export function freshSave(): SaveData {
-  return { version: 1, route: null, missions: {}, unlocked: ['livery_default'], livery: 'livery_default', relationship: 40, nyxBond: 20, flags: {}, savedAt: 0 };
+  return { version: 1, route: null, missions: {}, unlocked: ['livery_default'], livery: 'livery_default', relationship: 40, flags: {}, savedAt: 0 };
 }
 
 /** Validates + sanitises untrusted JSON. Returns null when structurally unusable. */
@@ -47,7 +46,6 @@ export function validateSave(raw: unknown): SaveData | null {
   if (typeof r.livery === 'string' && out.unlocked.includes(r.livery)) out.livery = r.livery;
   const num = (v: unknown, d: number) => (Number.isFinite(v) ? Math.max(0, Math.min(100, v as number)) : d);
   out.relationship = num(r.relationship, 40);
-  out.nyxBond = num(r.nyxBond, 20);
   if (r.flags && typeof r.flags === 'object') for (const [k, v] of Object.entries(r.flags as Record<string, unknown>)) if (typeof v === 'boolean') out.flags[k.slice(0, 40)] = v;
   out.savedAt = Number.isFinite(r.savedAt) ? (r.savedAt as number) : 0;
   return out;
@@ -104,5 +102,5 @@ export class SaveManager {
     this.save();
   }
   isCompleted(id: string) { return this.data.missions[id]?.completed === true; }
-  availableMissions(): string[] { return this.hasCampaign ? ['m01', 'school'] : []; }
+  availableMissions(): string[] { return this.hasCampaign ? ['m01', 'm02', 'm03', 'survival', 'school'] : []; }
 }

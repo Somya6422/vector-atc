@@ -1,11 +1,12 @@
 import type { Unit } from '../game/Entity';
 import type { Route, Grade } from '../persistence/SaveManager';
-import { BLIZZARD, placeBlizzard, FIELD_ELEV, RADAR_SITES, WAYPOINTS, WORLD, ALT_ROUTE_POINT, lineOfSight, radarSiteAlt, terrainHeight, blizzardAt, RUNWAY } from '../world/Heightfield';
+import { BLIZZARD, placeBlizzard, FIELD_ELEV, RADAR_SITES, WAYPOINTS, WORLD, ALT_ROUTE_POINT, cxMain, lineOfSight, radarSiteAlt, terrainHeight, blizzardAt, RUNWAY } from '../world/Heightfield';
 import { approachInfo } from '../world/Landing';
 import type { OutcomeKind } from '../story/Script';
 import { DEG, FT, KT, clamp } from '../util/math';
 
-export type MissionId = 'm01' | 'school';
+import { MISSIONS, type MissionId } from './MissionSpecs';
+export type { MissionId } from './MissionSpecs';
 export type Phase = 'P1_TAKEOFF' | 'P2_TRANSIT' | 'P3_INTERCEPT' | 'P4_BLIZZARD' | 'P5_RTB' | 'P6_DEBRIEF' | 'FAILED';
 export type ObjState = 'pending' | 'active' | 'done' | 'failed';
 export interface Objective { id: string; text: string; state: ObjState; detail?: string; }
@@ -19,7 +20,8 @@ export interface MissionStats {
   route: 'NONE' | 'MAIN' | 'ALT'; stormTime: number; wingmanSeparatedTime: number;
   touchdownSink: number; touchdownKt: number; hardLanding: boolean; landed: boolean;
   fuelAtEnd: number; healthAtEnd: number; wingHealthAtEnd: number; wingLanded: boolean; bingo: boolean;
-  shotsFired: number; hits: number; friendlyDamage: number; assistLanding: boolean;
+  shotsFired: number; hits: number; friendlyDamage: number; assistLanding: boolean; gatesPassed: number;
+  wavesCleared: number; suppliesCollected: number;
 }
 export interface MissionResult {
   completed: boolean; failReason: FailReason; score: number; maxScore: number; grade: Grade;
@@ -41,6 +43,10 @@ export interface MissionHost {
   setInterference(v: number): void;
   onPhase?(p: Phase): void;
   onObjective?(o: Objective): void;
+  /** survival: activate the next `count` dormant drones around the player */
+  spawnWave?(count: number): void;
+  /** survival: place a supply canister ahead of the player */
+  dropSupply?(): void;
 }
 
 const GRADES: [number, Grade][] = [[0.9, 'S'], [0.78, 'A'], [0.62, 'B'], [0.46, 'C'], [0.3, 'D']];
@@ -59,10 +65,13 @@ export class MissionDirector {
   engineStartRequested = false;
   leaderRolling = false;
   result: MissionResult | null = null;
+  get spec() { return MISSIONS[this.id]; }
+  /** optional low-level gates (bonus task): positions fixed at construction, passed flags updated in flight */
+  readonly gates: { x: number; y: number; z: number; passed: boolean }[] = [];
   readonly stats: MissionStats = {
     time: 0, kills: 0, bvrKills: 0, gunKills: 0, irKills: 0, escaped: 0, maxDetect: 0, detected: false, maskedTime: 0, exposedTime: 0,
     missileHitsTaken: 0, flaresUsed: 0, rescues: 0, route: 'NONE', stormTime: 0, wingmanSeparatedTime: 0, touchdownSink: 0, touchdownKt: 0,
-    hardLanding: false, landed: false, fuelAtEnd: 0, healthAtEnd: 0, wingHealthAtEnd: 0, wingLanded: false, bingo: false, shotsFired: 0, hits: 0, friendlyDamage: 0, assistLanding: false,
+    hardLanding: false, landed: false, fuelAtEnd: 0, healthAtEnd: 0, wingHealthAtEnd: 0, wingLanded: false, bingo: false, shotsFired: 0, hits: 0, friendlyDamage: 0, assistLanding: false, gatesPassed: 0, wavesCleared: 0, suppliesCollected: 0,
   };
   private step = {
     lineup: false, rotateCall: false, gearCall: false, climbCall: false, wp1: false, wp2: false, contact: false, idCall: false, frontWarn: 0, interf: false, routeMsg: false,
@@ -85,6 +94,49 @@ export class MissionDirector {
       { id: 'climb', text: 'Retract gear and climb to 4,000 ft', state: 'pending' },
     ]);
     this.nav = [{ id: 'field', name: 'RUNWAY 36', x: 0, y: FIELD_ELEV, z: 1100, kind: 'field' }];
+    const n = this.spec.gates;
+    for (let i = 0; i < n; i++) {
+      const z = WAYPOINTS.W1.z + (WAYPOINTS.W2.z - WAYPOINTS.W1.z) * (i + 1) / (n + 1), x = cxMain(z);
+      this.gates.push({ x, y: terrainHeight(x, z) + 150, z, passed: false });
+    }
+  }
+
+  // ----------------------------------------------------------------- arcade wave survival
+  wave = 0;
+  private waveSpawned = 0;
+  private nextWaveAt = -1;
+  get survival() { return this.spec.mode === 'survival'; }
+  /** Survival starts airborne: skip departure and go straight to the fight. */
+  startSurvival() {
+    this.engineStartRequested = true; this.startupProgress = 1;
+    this.setObjectives([{ id: 'wave', text: `Survive wave 1 / ${this.spec.waves!.length}`, state: 'active' }]);
+    this.nav = [];
+    this.enter('P3_INTERCEPT');
+    this.nextWave();
+  }
+  private nextWave() {
+    const waves = this.spec.waves!;
+    this.wave++; const n = waves[this.wave - 1];
+    this.waveSpawned += n; this.nextWaveAt = -1;
+    const o = this.obj('wave'); if (o) { o.text = `Survive wave ${this.wave} / ${waves.length}`; o.state = 'active'; o.detail = `${n} hostiles inbound`; this.host.onObjective?.(o); }
+    this.host.spawnWave?.(n);
+    this.host.sayRole('GC', this.wave === 1 ? `Wave one: ${n} hostiles, weapons free.` : `Wave ${this.wave}: ${n} contacts inbound. Weapons free.`, 2, 'wave');
+    this.lastProgress = this.t;
+  }
+  notifySupply() { this.stats.suppliesCollected++; this.host.sayRole('GC', 'Supply canister collected. Rearmed.', 1, 'supply'); if (this.nextWaveAt > this.t + 3) this.nextWaveAt = this.t + 3; }
+  private updateSurvival() {
+    const h = this.host, waves = this.spec.waves!;
+    if (this.nextWaveAt > 0) { if (this.t >= this.nextWaveAt) this.nextWave(); return; }
+    const spawned = h.drones.slice(0, this.waveSpawned);
+    for (const d of spawned) if (d.alive && !d.removed && (Math.abs(d.pos.x) > WORLD.maxX - 500 || d.pos.z < WORLD.minZ + 800 || d.pos.z > WORLD.maxZ - 500)) { d.removed = true; this.stats.escaped++; }
+    const live = spawned.filter(d => d.alive && !d.removed).length;
+    const o = this.obj('wave'); if (o) { const det = `${live} hostile${live === 1 ? '' : 's'} left`; if (o.detail !== det) { o.detail = det; h.onObjective?.(o); } }
+    if (live > 0) return;
+    this.stats.wavesCleared++;
+    if (this.wave >= waves.length) { if (o) this.setState('wave', 'done', 'All waves cleared'); h.sayRole('GC', 'That was the last wave. Outstanding work.', 2); this.finish(); return; }
+    h.sayRole('GC', `Wave ${this.wave} down. Supply drop marked ahead – fly through it. Next wave in twenty seconds.`, 2, 'wavedown');
+    h.dropSupply?.();
+    this.nextWaveAt = this.t + 20;
   }
 
   // ----------------------------------------------------------------- helpers
@@ -130,7 +182,8 @@ export class MissionDirector {
 
     // ---- global failure conditions ----
     if (pm.crashed) return this.fail(pm.fuel <= 0 && pm.crashCause === 'TERRAIN' ? 'FUEL' : 'CRASH');
-    if (!w.alive) { h.say('wingman_lost'); return this.fail('WINGMAN_LOST'); }
+    if (!w.alive && !this.survival) { h.say('wingman_lost'); return this.fail('WINGMAN_LOST'); }
+    if (this.survival) { this.updateSurvival(); return; }
     // fuel: flameout is not instant failure – the player may still glide to the runway
     const fuelFrac = pm.fuel / p.cfg.fuelCapacity;
     if (fuelFrac < 0.22 && !this.step.bingoCall) { this.step.bingoCall = true; this.stats.bingo = true; h.say('bingo'); }
@@ -163,6 +216,9 @@ export class MissionDirector {
       s.lineup = true; this.setState('lineup', 'done'); this.setState('takeoff', 'active');
       h.say('lineup'); h.say(h.route === 'A_BOY_SU57' ? 'lineup_banter_A' : 'lineup_banter_B');
     }
+    if (!s.lineup && h.player.cfg.id === 'F35' && this.startupProgress >= 1 && !pm.onGround && pm.pos.y - FIELD_ELEV > 25) {   // STOVL vertical take-off: no runway needed
+      s.lineup = true; this.setState('lineup', 'done', 'Vertical take-off'); this.setState('takeoff', 'active');
+    }
     this.leaderRolling = s.lineup && pm.onGround && pm.vel.length() > 12;
     if (s.lineup && pm.onGround && pm.iasKt >= 135 && !s.rotateCall) { s.rotateCall = true; h.say('rotate'); }
     if (s.lineup && !pm.onGround && this.obj('takeoff')?.state === 'active') {
@@ -183,6 +239,7 @@ export class MissionDirector {
   private p2Begin() {
     this.enter('P2_TRANSIT');
     this.addObjective({ id: 'wp1', text: `Fly the valley low to ${WAYPOINTS.W1.name.replace('WP1 ', '')}`, state: 'active' });
+    if (this.gates.length) this.addObjective({ id: 'gates', text: `Bonus: fly the valley gates (0 / ${this.gates.length})`, state: 'active' });
     if (this.id !== 'school') this.addObjective({ id: 'wp2', text: `Continue to ${WAYPOINTS.W2.name.replace('WP2 ', '')} – stay terrain-masked`, state: 'pending' });
     this.nav = [
       { id: 'wp1', name: WAYPOINTS.W1.name, x: WAYPOINTS.W1.x, y: 700, z: WAYPOINTS.W1.z, kind: 'wp' },
@@ -192,8 +249,22 @@ export class MissionDirector {
 
   // ----------------------------------------------------------------- phase 2
   private reached(wp: { x: number; z: number }, r = 2800) { const pm = this.host.player.model; return Math.hypot(pm.pos.x - wp.x, pm.pos.z - wp.z) < r; }
+  private updateGates() {
+    if (!this.gates.length) return;
+    const pp = this.host.player.pos;
+    for (const g of this.gates) {
+      if (g.passed) continue;
+      if (Math.hypot(pp.x - g.x, pp.y - g.y, pp.z - g.z) < 95) {
+        g.passed = true; this.stats.gatesPassed++;
+        const o = this.obj('gates'); if (o) o.text = `Bonus: fly the valley gates (${this.stats.gatesPassed} / ${this.gates.length})`;
+        this.setState('gates', this.stats.gatesPassed >= this.gates.length ? 'done' : 'active', `${this.stats.gatesPassed} / ${this.gates.length}`);
+        this.host.sayRole('GC', this.stats.gatesPassed >= this.gates.length ? 'All gates cleared. Beautiful flying.' : 'Gate cleared.', 1, 'gate');
+      }
+    }
+  }
   private p2() {
     const h = this.host, s = this.step;
+    this.updateGates();
     if (!s.wp1 && this.reached(WAYPOINTS.W1)) {
       s.wp1 = true; this.setState('wp1', 'done'); h.say('wp1');
       // Flight School: practise the circuit only – turn around at Halcyon Gate and land
@@ -210,7 +281,9 @@ export class MissionDirector {
     this.enter('P3_INTERCEPT'); this.p3Start = this.t;
     this.host.activateDrones(this.alerted);
     this.addObjective({ id: 'find', text: 'Detect and identify the unknown contacts (R to select)', state: 'active' });
-    this.addObjective({ id: 'kill', text: 'Neutralise both hostile drones', state: 'pending', detail: '0 / 2' });
+    const nd = this.host.drones.length;
+    this.addObjective({ id: 'kill', text: nd === 2 ? 'Neutralise both hostile drones' : `Neutralise all ${nd} hostile drones`, state: 'pending', detail: `0 / ${nd}` });
+    this.addObjective({ id: 'bonusGun', text: 'Bonus: score a cannon kill (20 mm)', state: 'active' });
     this.nav = [{ id: 'wp3', name: WAYPOINTS.W3.name, x: WAYPOINTS.W3.x, y: 1800, z: WAYPOINTS.W3.z, kind: 'wp' }];
   }
   private p3() {
@@ -222,12 +295,13 @@ export class MissionDirector {
     if (s.idCall && !s.lrHint && h.drones.some(d => d.alive && d.pos.distanceTo(h.player.pos) > 12000 && d.pos.distanceTo(h.player.pos) < 36000)) { s.lrHint = true; h.say(h.route === 'A_BOY_SU57' ? 'hint_lr' : 'hint_lr_B'); }
     // escaped drones (fled out of the play area) are removed – the intercept still resolves
     for (const d of h.drones) if (d.alive && !d.removed && d.pos.z < WORLD.minZ + 2200) { d.removed = true; this.stats.escaped++; h.say('drone_escaped'); }
+    if (this.stats.gunKills > 0 && this.obj('bonusGun')?.state === 'active') this.setState('bonusGun', 'done');
     const dead = h.drones.filter(d => !d.alive).length;
     this.setState('kill', this.obj('kill')!.state === 'pending' ? 'pending' : 'active', `${dead} / ${h.drones.length}`);
     if (live.length === 0) {
       this.setState('find', 'done'); this.setState('kill', 'done', `${dead} / ${h.drones.length}`);
       if (this.stats.escaped === 0) h.say('intercept_done');
-      this.p4Begin();
+      if (this.spec.storm) this.p4Begin(); else this.p5Begin();
     }
   }
 
@@ -307,6 +381,7 @@ export class MissionDirector {
 
   // ----------------------------------------------------------------- radar network
   private updateRadarNetwork(dt: number) {
+    if (!this.spec.radar) { this.masked = true; return; }
     if (this.phase === 'P1_TAKEOFF' || this.phase === 'P6_DEBRIEF' || this.phase === 'FAILED') return;
     this.radarTimer -= dt; if (this.radarTimer > 0) { this.applyDetect(dt); return; }
     this.radarTimer = 0.25;
@@ -365,10 +440,27 @@ export class MissionDirector {
     st.shotsFired = h.player.shotsFired; st.hits = h.player.hits;
     const b: { label: string; points: number }[] = [];
     const add = (label: string, points: number) => { b.push({ label, points: Math.round(points) }); };
+    if (this.survival) {
+      const waves = this.spec.waves!, total = waves.reduce((a, b) => a + b, 0);
+      add(`Hostiles destroyed (${st.kills}/${total})`, st.kills * 500);
+      add(`Waves cleared (${st.wavesCleared}/${waves.length})`, st.wavesCleared * 600);
+      if (st.gunKills) add('Cannon kills', st.gunKills * 100);
+      if (st.suppliesCollected) add('Supply drops collected', st.suppliesCollected * 100);
+      add('Aircraft condition', 500 * st.healthAtEnd);
+      if (st.missileHitsTaken) add('Missile hits taken', -st.missileHitsTaken * 120);
+      const MAXS = total * 500 + waves.length * 600 + 500 + 300;
+      const scoreS = Math.max(0, b.reduce((s, x) => s + x.points, 0));
+      let gradeS: Grade = completed ? 'D' : 'F';
+      if (completed) for (const [th, gg] of GRADES) if (scoreS / MAXS >= th) { gradeS = gg; break; }
+      const kindS: OutcomeKind = completed ? (st.missileHitsTaken === 0 && st.healthAtEnd > 0.9 ? 'FLAWLESS' : 'CLOSE_CALL') : 'FAIL_CRASH';
+      return { completed, failReason, score: scoreS, maxScore: MAXS, grade: gradeS, breakdown: b, stats: { ...st }, kind: kindS, title: completed ? 'All Waves Survived' : `Shot Down on Wave ${this.wave}` };
+    }
     const school = this.id === 'school';
-    const MAX = school ? 2400 : 5600;
+    const MAX = school ? 2400 : 5600 + (h.drones.length - 2) * 500 + this.gates.length * 100 + 150;
     if (completed) add('Mission complete', 1200);
     if (!school) add(`Hostile drones destroyed (${st.kills}/${h.drones.length})`, st.kills * 500);
+    if (st.gatesPassed) add(`Valley gates (${st.gatesPassed}/${this.gates.length})`, st.gatesPassed * 100);
+    if (!school && st.gunKills) add('Bonus task: cannon kill', 150);
     if (st.bvrKills) add('Long-range missile kill', st.bvrKills * 200);
     if (st.gunKills) add('Cannon kill', st.gunKills * 100);
     if (completed || h.wingman.alive) add('Wingman survived', h.wingman.alive ? 300 + 600 * st.wingHealthAtEnd : 0);

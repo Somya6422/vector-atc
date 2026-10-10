@@ -11,9 +11,10 @@ export type Cmd =
   | { t: 'heading'; deg: number } | { t: 'pitch'; deg: number }
   | { t: 'goto_nav' } | { t: 'goto_home' } | { t: 'autoland' } | { t: 'autotakeoff' } | { t: 'taxi' } | { t: 'stop' }
   | { t: 'weapon'; w: 'GUN' | 'IR' | 'RADAR' } | { t: 'target' } | { t: 'fire'; w?: 'GUN' | 'IR' | 'RADAR' } | { t: 'cease' }
-  | { t: 'wing'; cmd: 'cover' | 'engage' | 'rejoin' | 'formation'; f?: 'ECHELON_RIGHT' | 'LINE_ABREAST' | 'TRAIL' } | { t: 'wing_report' }
+  | { t: 'recover' } | { t: 'cobra' } | { t: 'kulbit' } | { t: 'stovl' } | { t: 'ecm' }
+  | { t: 'wing'; cmd: 'cover' | 'engage' | 'rejoin' | 'formation' | 'rtb'; f?: 'ECHELON_RIGHT' | 'LINE_ABREAST' | 'TRAIL' } | { t: 'wing_report' }
   | { t: 'report'; what: 'status' | 'fuel' | 'altitude' | 'speed' | 'heading' | 'enemies' | 'airfield' }
-  | { t: 'camera'; view?: 'chase' | 'cockpit' | 'wing' | 'orbit' | 'front' | 'flyby'; next?: boolean } | { t: 'mouse'; on?: boolean } | { t: 'radar_range'; km: number }
+  | { t: 'camera'; view?: 'chase' | 'cockpit' | 'wing' | 'tail' | 'orbit' | 'front' | 'target' | 'tactical' | 'tower' | 'cinematic' | 'flyby'; next?: boolean } | { t: 'mouse'; on?: boolean } | { t: 'radar_range'; km: number }
   | { t: 'pause' } | { t: 'resume' } | { t: 'map' } | { t: 'objectives' } | { t: 'hint' } | { t: 'start_engines' } | { t: 'restart' } | { t: 'hangar' } | { t: 'menu' }
   | { t: 'new_campaign' } | { t: 'pick_route'; route: 'A_BOY_SU57' | 'B_GIRL_F35' } | { t: 'launch' } | { t: 'briefing' } | { t: 'continue' } | { t: 'settings' } | { t: 'controls' } | { t: 'credits' } | { t: 'back' } | { t: 'interact' }
   | { t: 'radio'; to: 'ground' | 'wingman'; text: string }
@@ -68,9 +69,9 @@ function parseClause(s: string, raw: string): Cmd[] {
   if (has(/\b(go|back|return) (to )?(the )?hangar\b|\bhangar\b/)) return [{ t: 'hangar' }];
   if (has(/\b(main menu|exit to menu|quit to menu|go to menu)\b/)) return [{ t: 'menu' }];
   if (has(/\bsettings\b|\boptions\b/)) return [{ t: 'settings' }];
-  if (has(/\b(controls|keyboard|key bindings?|keybinds?)\b/)) return [{ t: 'controls' }];
+  if (has(/\b(controls|keyboard|key bindings?|keybinds?|shortcuts?|commands list|show (the )?commands|what can i say|help me with (the )?keys)\b/)) return [{ t: 'controls' }];
   if (has(/\bcredits\b/)) return [{ t: 'credits' }];
-  if (has(/\b(pet|stroke|cuddle)\b.*\b(cat|nyx)\b|\b(talk to|interact with|greet|say hello to)\b.*\b(cat|nyx)\b|^interact$/)) return [{ t: 'interact' }];
+  if (has(/^interact$/)) return [{ t: 'interact' }];
   if (has(/^(go )?back$|^close( this| it)?$|^cancel$|^never ?mind$/)) return [{ t: 'back' }];
 
   // ---- pause / resume / panels ----
@@ -94,6 +95,7 @@ function parseClause(s: string, raw: string): Cmd[] {
   if (has(/\b(status|report|systems check|how are we)\b/)) return [{ t: 'report', what: 'status' }];
 
   // ---- wingman commands ----
+  if (has(/\b(wingman|wing man|specter (one|two|1|2))\b/) && has(/\b(rtb|return to base|go home|head home|bug out|go back)\b/)) return [{ t: 'wing', cmd: 'rtb' }];
   if (has(/\b(cover me|defensive|protect me|defend me|watch my (six|back)|stay close)\b/)) return [{ t: 'wing', cmd: 'cover' }];
   if (has(/\b(rejoin|re join|form up|on my wing|regroup|join (up )?(on )?me)\b/)) return [{ t: 'wing', cmd: 'rejoin' }];
   if ((m = s.match(/\b(echelon|line abreast|abreast|trail)\b/)) && has(/formation|form|go|switch|change|fly|\bbe\b/)) return [{ t: 'wing', cmd: 'formation', f: m[1] === 'echelon' ? 'ECHELON_RIGHT' : m[1] === 'trail' ? 'TRAIL' : 'LINE_ABREAST' }];
@@ -109,11 +111,16 @@ function parseClause(s: string, raw: string): Cmd[] {
 
   // ---- autopilot / navigation assists ----
   if (has(/\b(auto ?land|land (the )?(aircraft|plane|jet|for me)|request landing|land now|land (on|at) (the )?runway|bring (it|me) in)\b|^land$/)) return [{ t: 'autoland' }];
-  if (has(/\b(auto ?takeoff|take ?off|depart|take off now)\b/)) return [{ t: 'autotakeoff' }];
+  if (!has(/\bvertical\b/) && has(/\b(auto ?takeoff|take ?off|depart|take off now)\b/)) return [{ t: 'autotakeoff' }];
   if (has(/\btaxi\b/)) return [{ t: 'taxi' }];
   if (has(/\b(take me|fly me|go|head|return|rtb|bring me)\b.*\b(home|back to base|the airfield|base)\b|\b(rtb|return to base)\b/)) return [{ t: 'goto_home' }];
   if (has(/\b(fly|go|head|navigate|proceed)( to| toward| towards)?( the)?( next)?( waypoint| nav point| nav| objective)\b|\bnext waypoint\b/)) return [{ t: 'goto_nav' }];
   if (has(/\b(autopilot|auto pilot)\b.*\b(off|disengage|cancel)\b|\b(disengage|cancel|kill) (the )?(autopilot|auto pilot|assist)\b|\bmanual( control)?\b|\bi have (control|the aircraft)\b|\bstand down autopilot\b/)) return [{ t: 'ap_off' }];
+  if (has(/\b(cobra|pugachev)\b/)) return [{ t: 'cobra' }];
+  if (has(/\b(kulbit|kulbeet|somersault|backflip|back flip)\b/)) return [{ t: 'kulbit' }];
+  if (has(/\b(hover|stovl|vtol|vertical (take ?off|landing|lift)|lift fan|convert to (hover|forward flight)|transition( to forward flight)?|forward flight)\b/)) return [{ t: 'stovl' }];
+  if (has(/\b(ecm|jammer|jamming|jam (them|the radar|radar)|electronic (warfare|attack|countermeasures))\b/)) return [{ t: 'ecm' }];
+  if (has(/\b(recover|auto ?recover(y)?|panic|save me|spin recovery|i ?a?m lost|i ?a?m spinning|unusual attitude)\b/)) return [{ t: 'recover' }];
   if (has(/\b(level (the )?wings|wings level|level (out|off)|straight and level|fly level)\b/)) return [{ t: 'level' }];
   if (has(/\b(hold|maintain|keep)( this| the| current)? (altitude|height)\b/)) return [{ t: 'hold_alt' }];
   if (has(/\b(hold|maintain|keep)( this| the| current)? (heading|course)\b/)) return [{ t: 'hold_hdg' }];
@@ -152,8 +159,8 @@ function parseClause(s: string, raw: string): Cmd[] {
 
   // ---- camera / view ----
   if (has(/\b(next|change|switch|cycle)( the)?( camera| view| angle)\b|\bnext (camera|view|angle)\b/)) return [{ t: 'camera', next: true }];
-  if ((m = s.match(/\b(chase|cockpit|wing|side|orbit|front|flyby|fly by|external|tail)\b/)) && has(/\b(camera|view|angle|show|switch|look|go to)\b|^(chase|cockpit|orbit|flyby)$/)) {
-    const v = m[1]; const map: Record<string, 'chase' | 'cockpit' | 'wing' | 'orbit' | 'front' | 'flyby'> = { chase: 'chase', external: 'chase', tail: 'chase', cockpit: 'cockpit', wing: 'wing', side: 'wing', orbit: 'orbit', front: 'front', flyby: 'flyby', 'fly by': 'flyby' };
+  if ((m = s.match(/\b(chase|cockpit|wing|side|orbit|front|flyby|fly by|external|tail|rear|tactical|overhead|top down|tower|target|cinematic|movie)\b/)) && has(/\b(camera|view|angle|show|switch|look|go to)\b|^(chase|cockpit|orbit|flyby|tail|tactical|tower|cinematic)$/)) {
+    const v = m[1]; const map: Record<string, 'chase' | 'cockpit' | 'wing' | 'tail' | 'orbit' | 'front' | 'target' | 'tactical' | 'tower' | 'cinematic' | 'flyby'> = { chase: 'chase', external: 'chase', tail: 'tail', rear: 'tail', tactical: 'tactical', overhead: 'tactical', 'top down': 'tactical', tower: 'tower', target: 'target', cinematic: 'cinematic', movie: 'cinematic', cockpit: 'cockpit', wing: 'wing', side: 'wing', orbit: 'orbit', front: 'front', flyby: 'flyby', 'fly by': 'flyby' };
     return [{ t: 'camera', view: map[v] }];
   }
   if (has(/\bmouse (aim|flight|control)\b/)) return [{ t: 'mouse', on: has(/\boff\b|\bdisable\b|\bstop\b/) ? false : has(/\bon\b|\benable\b|\bturn on\b|\bstart\b/) ? true : undefined }];

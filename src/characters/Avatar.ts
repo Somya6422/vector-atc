@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { makeHelmet } from '../flight/AircraftMesh';
 import { getModel } from '../flight/ModelCache';
+import { getPilotModel } from './PilotModels';
 
 export type Gesture = 'idle' | 'arms_crossed' | 'hand_on_hip' | 'crouch';
 
 /**
- * Stylised low-poly pilot. The BOY has a simple face; the GIRL has *no head or face geometry at all* – only a helmet
- * with a closed mirrored-gold visor, in every pose (walking, standing, crouching, gesturing).
+ * Stylised pilot with colour: orange flight suit and brown hair for the boy, teal suit and auburn ponytail for the girl.
+ * Both show their faces in the hangar; the girl no longer wears a mask.
  */
 export class Avatar {
   readonly group = new THREE.Group();
@@ -33,31 +33,30 @@ export class Avatar {
     const suit = new THREE.MeshStandardMaterial({ color: suitColor, roughness: 0.8 });
     const dark = new THREE.MeshStandardMaterial({ color: 0x1e2226, roughness: 0.9 });
     const pm = getModel('pilot');
-    if (pm) {
+    const real = getPilotModel(girl ? 'girl' : 'boy');
+    if (real) {
+      // textured character from the supplied .blend (already standing on y = 0, facing -Z, arms relaxed)
+      this.torso = new THREE.Mesh(real.geometry, real.material); this.torso.castShadow = true; this.torso.receiveShadow = true; this.group.add(this.torso);
+      this.armL = new THREE.Group(); this.armR = new THREE.Group(); this.legL = new THREE.Group(); this.legR = new THREE.Group();
+      this.head = new THREE.Group(); this.head.position.y = real.height - 0.12; this.group.add(this.head);
+      this.modelMode = true;
+    } else if (pm) {
       // user-supplied pilot sculpt (base removed, feet at y=0, facing -Z). Limbs are baked into the mesh, so motion is body sway/lean/bob.
-      const mat = new THREE.MeshStandardMaterial({ color: suitColor, roughness: 0.78, metalness: 0.05 });
-      this.torso = new THREE.Mesh(pm, mat); this.torso.castShadow = true; this.torso.rotation.y = Math.PI; this.group.add(this.torso);   // sculpt faces +Z natively; avatars face -Z
+      const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.78, metalness: 0.05 });
+      this.torso = new THREE.Mesh(Avatar.colourise(pm, suitColor, girl), mat); this.torso.castShadow = true; this.torso.rotation.y = Math.PI; this.group.add(this.torso);   // sculpt faces +Z natively; avatars face -Z
       this.armL = new THREE.Group(); this.armR = new THREE.Group(); this.legL = new THREE.Group(); this.legR = new THREE.Group();
       this.head = new THREE.Group();
       const hc = Avatar.headCentre(pm); hc.x *= -1; hc.z *= -1; this.head.position.copy(hc); this.group.add(this.head);
-      if (girl) {
-        // She always wears a closed, opaque, mirrored-gold visor that completely covers the sculpt's head and face.
-        const hm = makeHelmet(true, 1.22); this.head.add(hm); this.head.userData.girlHead = true;
-      }
+      this.addHair(girl, 0.16); this.addFace(girl, 0.16);
       this.modelMode = true;
     } else {
       this.torso = new THREE.Mesh(new THREE.CapsuleGeometry(girl ? 0.2 : 0.23, 0.45, 4, 10), suit); this.torso.position.y = 1.2; this.torso.castShadow = true; this.group.add(this.torso);
       const belt = new THREE.Mesh(new THREE.CylinderGeometry(girl ? 0.2 : 0.23, girl ? 0.2 : 0.23, 0.08, 12), dark); belt.position.y = 0.98; this.group.add(belt);
       this.head = new THREE.Group(); this.head.position.y = 1.72; this.group.add(this.head);
-      if (girl) {
-        const hm = makeHelmet(true, 1.0); this.head.add(hm);               // gold-visor helmet, always on
-        this.head.userData.girlHead = true;
-      } else {
-        const skin = new THREE.MeshStandardMaterial({ color: 0xd9a77f, roughness: 0.7 });
-        const skull = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 12), skin); this.head.add(skull);
-        const hair = new THREE.Mesh(new THREE.SphereGeometry(0.135, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), new THREE.MeshStandardMaterial({ color: 0x2b1d14, roughness: 0.9 })); hair.position.y = 0.01; this.head.add(hair);
-        for (const sx of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.014, 6, 6), new THREE.MeshBasicMaterial({ color: 0x111111 })); e.position.set(sx * 0.045, 0.01, -0.12); this.head.add(e); }
-      }
+      const skin = new THREE.MeshStandardMaterial({ color: girl ? 0xe0b08c : 0xd9a77f, roughness: 0.7 });
+      const skull = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 12), skin); this.head.add(skull);
+      this.addHair(girl, 0.135); this.addFace(girl, 0.125);
+      for (const sx of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.014, 6, 6), new THREE.MeshBasicMaterial({ color: 0x111111 })); e.position.set(sx * 0.045, 0.01, -0.12); this.head.add(e); }
       const mkLimb = (len: number, r: number, mat: THREE.Material) => {
         const g = new THREE.Group(); const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 4, 8), mat); m.position.y = -len / 2 - r; m.castShadow = true; g.add(m); return g;
       };
@@ -69,6 +68,49 @@ export class Avatar {
       this.group.add(this.armL, this.armR, this.legL, this.legR);
       if (girl) { const patch = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.06, 0.01), new THREE.MeshStandardMaterial({ color: 0xd8a437, metalness: 0.8, roughness: 0.3 })); patch.position.set(0.1, 1.4, -0.21); this.group.add(patch); }
     }
+  }
+
+  /** Eyes, brows, nose and mouth on the front (-Z) of the head so the face reads as a person. */
+  private addFace(girl: boolean, r: number) {
+    const f = r / 0.135, z = -r * 0.93;
+    const white = new THREE.MeshStandardMaterial({ color: 0xf4f1ec, roughness: 0.3 }), iris = new THREE.MeshStandardMaterial({ color: girl ? 0x2f6f5f : 0x4a3322, roughness: 0.25 });
+    const brow = new THREE.MeshStandardMaterial({ color: girl ? 0x4a2216 : 0x20150e, roughness: 0.9 });
+    for (const sx of [-1, 1]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.013 * f, 12, 8), white); eye.position.set(sx * 0.048 * f, 0.016 * f, z + 0.004); eye.scale.z = 0.5; this.head.add(eye);
+      const ir = new THREE.Mesh(new THREE.SphereGeometry(0.0085 * f, 10, 8), iris); ir.position.set(sx * 0.048 * f, 0.016 * f, z - 0.003); ir.scale.z = 0.4; this.head.add(ir);
+      const br = new THREE.Mesh(new THREE.BoxGeometry(0.04 * f, 0.006 * f, 0.008 * f), brow); br.position.set(sx * 0.048 * f, 0.04 * f, z + 0.006); br.rotation.z = -sx * (girl ? 0.12 : 0.05); this.head.add(br);
+    }
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.014 * f, 10, 8), new THREE.MeshStandardMaterial({ color: girl ? 0xd9a07c : 0xc99468, roughness: 0.7 })); nose.position.set(0, -0.012 * f, z - 0.004); nose.scale.z = 0.8; this.head.add(nose);
+    const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.036 * f, 0.006 * f, 0.008 * f), new THREE.MeshStandardMaterial({ color: girl ? 0xb04a55 : 0x7a3a33, roughness: 0.5 })); mouth.position.set(0, -0.06 * f, z + 0.008); this.head.add(mouth);
+  }
+
+  private addHair(girl: boolean, r: number) {
+    const hairMat = new THREE.MeshStandardMaterial({ color: girl ? 0x6a2f1c : 0x2b1d14, roughness: 0.85 });
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.5), hairMat); cap.position.y = 0.035; cap.rotation.x = -0.25; this.head.add(cap);
+    if (girl) { const tail = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.2, 4, 8), hairMat); tail.position.set(0, -0.06, 0.16); tail.rotation.x = 0.35; this.head.add(tail); }
+  }
+
+  /** Per-vertex colours on a clone of the sculpt: boots, suit, belt, trim, skin (head) – so one plain mesh reads as a dressed pilot. */
+  private static colourise(src: THREE.BufferGeometry, suit: number, girl: boolean): THREE.BufferGeometry {
+    const g = src.clone(); g.computeBoundingBox();
+    const top = g.boundingBox!.max.y, bot = g.boundingBox!.min.y, h = top - bot;
+    if (!g.getAttribute('normal')) g.computeVertexNormals();
+    const p = g.getAttribute('position'), nrm = g.getAttribute('normal'), col = new Float32Array(p.count * 3);
+    const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+    const c = new THREE.Color(), suitC = new THREE.Color(suit), dark = new THREE.Color(0x24282c), skin = new THREE.Color(girl ? 0xe0b08c : 0xd9a77f), belt = new THREE.Color(0x3a2e24), trim = new THREE.Color(girl ? 0xf2f4f6 : 0x2b3a2a);
+    for (let i = 0; i < p.count; i++) {
+      const y = p.getY(i) - bot;
+      if (y < 0.06 * h) c.copy(dark);
+      else if (y > h * 0.865) c.copy(skin);
+      else if (y > 0.5 * h && y < 0.55 * h) c.copy(belt);
+      else if (y > 0.74 * h && y < 0.78 * h) c.copy(trim);
+      else c.copy(suitC);
+      const ny = nrm ? nrm.getY(i) : 0, nz = nrm ? nrm.getZ(i) : 0;
+      const ao = 0.78 + 0.22 * clamp01(0.5 + ny * 0.6) - 0.06 * Math.max(0, -nz);   // darker on undersides / back, lighter on top
+      col[i * 3] = c.r * ao; col[i * 3 + 1] = c.g * ao; col[i * 3 + 2] = c.b * ao;
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    return g;
   }
 
   get position() { return this.group.position; }
