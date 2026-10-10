@@ -12,6 +12,8 @@ export class Input {
   mouseX = typeof window !== 'undefined' ? window.innerWidth / 2 : 0; mouseY = typeof window !== 'undefined' ? window.innerHeight / 2 : 0; mouseDX = 0; mouseDY = 0;
   mouseButtons = 0;
   enabled = true;
+  /** mouse-aim flight wants relative mouse movement: grab the pointer on the next click so it never hits the screen edge */
+  wantLock = false;
   private disposers: (() => void)[] = [];
   /** Called for key presses that should reach the UI layer even while the game is idle (e.g. Escape). */
   onKeyDown?: (code: string, e: KeyboardEvent) => boolean | void;
@@ -36,7 +38,7 @@ export class Input {
     const blur = () => this.reset();
     const vis = () => { if (document.hidden) this.reset(); };
     const mm = (e: MouseEvent) => { this.mouseX = e.clientX; this.mouseY = e.clientY; this.mouseDX += e.movementX || 0; this.mouseDY += e.movementY || 0; };
-    const md = (e: MouseEvent) => { if (!this.enabled) return; if ((e.target as HTMLElement)?.closest?.('.ui-panel,button,input,select')) return; this.mouseButtons |= 1 << e.button; if (e.button === 0) this.pressed.add('Mouse0'); };
+    const md = (e: MouseEvent) => { if (!this.enabled) return; if ((e.target as HTMLElement)?.closest?.('.ui-panel,button,input,select')) return; this.mouseButtons |= 1 << e.button; if (this.wantLock && !document.pointerLockElement) { try { (document.body.requestPointerLock as (() => void) | undefined)?.call(document.body); } catch { /* denied */ } } if (e.button === 0) this.pressed.add('Mouse0'); };
     const mu = (e: MouseEvent) => { this.mouseButtons &= ~(1 << e.button); };
     const cm = (e: Event) => e.preventDefault();
     window.addEventListener('keydown', kd); window.addEventListener('keyup', ku); window.addEventListener('blur', blur);

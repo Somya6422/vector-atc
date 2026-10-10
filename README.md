@@ -100,9 +100,13 @@ Bonus tasks appear in the objective list. Mission data lives in `src/missions/Mi
 
 Chase, cockpit, wing, tail (low rear), orbit, front, target (lock-on, frames the selected contact), tactical (overhead), tower (fixed near the airfield), cinematic (slow orbiting drone shot) and flyby. Voice: "tactical view", "tail camera", "cinematic view", "next camera".
 
+## Mouse-aim (key N)
+
+Mouse-aim now flies the nose onto a world-fixed aim point. Move the mouse and the amber aim cursor moves; the jet banks and pulls until its nose cross sits on the cursor. Click once in the game and the pointer is captured, so it never runs into the screen edge; Esc releases it and pauses. Pressing any flight key snaps the aim point back to the nose. The aim point cannot swing more than 100 degrees from the nose. In a scripted test the nose settled within 1 degree of the aim point about 5 s after a 60 degree move.
+
 ## Jet details
 
-Every aircraft now has squadron-coloured wingtips, visible under-wing missiles that disappear as they are fired, blinking anti-collision strobes, and a hot white core in the afterburner flame.
+Jets use clear-coated paint with fine panel seams and glossy tinted canopies. Every aircraft also has squadron-coloured wingtips, visible under-wing missiles that disappear as they are fired, blinking anti-collision strobes, and a hot white core in the afterburner flame.
 
 ## Controls
 

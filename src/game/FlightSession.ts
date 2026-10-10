@@ -43,7 +43,7 @@ export interface SessionOptions {
 }
 
 /** One mission run: units, AI, weapons, director, camera/HUD feed. Destroyed completely when the mission ends or restarts. */
-const _hv = new THREE.Vector3();
+const _hv = new THREE.Vector3(), _af = new THREE.Vector3(), _ab = new THREE.Vector3(), _ar = new THREE.Vector3(), _ap = new THREE.Vector3(), _aq = new THREE.Quaternion();
 export class FlightSession {
   readonly player: Unit; readonly wingman: Unit; readonly drones: Unit[] = [];
   readonly units: Unit[] = [];
@@ -335,11 +335,12 @@ export class FlightSession {
   private handleInput(dt: number) {
     const inp = this.o.input, p = this.player, ts = this.targeting, st = this.o.settings.data;
     this.fc.invertPitch = st.invertPitch;
-    const mouseOn = st.mouseFlight && !this.o.camera.freeLook;
-    this.mouseNorm = mouseOn ? this.mouseOffset() : null;
-    this.fc.update(inp, dt, this.mouseNorm);
+    const mouseOn = st.mouseFlight && !this.o.camera.freeLook && this.assists.auto === 'none' && !this.player.model.crashed;
+    inp.wantLock = st.mouseFlight;
+    this.mouseNorm = mouseOn ? { x: 0, y: 0 } : null;
+    this.fc.update(inp, dt, mouseOn ? this.aimStep(inp, dt) : (this.aimReady = false, null));
     // voice assists (autopilot / taxi / take-off / landing): any manual stick input hands control straight back
-    const manual = inp.held('pitchUp') || inp.held('pitchDown') || inp.held('rollLeft') || inp.held('rollRight') || inp.held('yawLeft') || inp.held('yawRight') || (!!this.mouseNorm && Math.hypot(this.mouseNorm.x, this.mouseNorm.y) > 0.3);
+    const manual = inp.held('pitchUp') || inp.held('pitchDown') || inp.held('rollLeft') || inp.held('rollRight') || inp.held('yawLeft') || inp.held('yawRight') || (!!this.mouseNorm && Math.abs(inp.mouseDX) + Math.abs(inp.mouseDY) > 3);
     this.assists.update(dt, this.elapsed, this.assists.auto === 'taxi' ? false : manual, inp.held('throttleUp') || inp.held('throttleDown'));
     if (inp.wasPressed('autopilot')) this.flash(this.assists.active ? this.voiceExec({ t: 'ap_off' }) : this.voiceExec({ t: 'level' }), 2);
     if (inp.wasPressed('mouseFlight')) { this.o.settings.set('mouseFlight', !st.mouseFlight); this.flash(this.o.settings.data.mouseFlight ? 'MOUSE-AIM ON – the nose follows the cursor' : 'MOUSE-AIM OFF – keyboard flight', 1.8); }
@@ -391,10 +392,57 @@ export class FlightSession {
 
   private mouseNorm: { x: number; y: number } | null = null;
   private autoRolled = false;
-  /** Cursor offset from the screen centre, normalised by ~38 % of the short side and clamped to -1..1. */
-  private mouseOffset() {
-    const W = window.innerWidth, H = window.innerHeight, r = Math.min(W, H) * 0.38, i = this.o.input;
-    return { x: Math.max(-1, Math.min(1, (i.mouseX - W / 2) / r)), y: Math.max(-1, Math.min(1, (i.mouseY - H / 2) / r)) };
+  // ---- mouse-aim: a world-fixed aim point that the nose is flown onto ----
+  private aimDir = new THREE.Vector3(0, 0, -1);
+  private aimReady = false;
+  private aimYaw = 0; private aimPitch = 0;
+  private static readonly AIM_SENS = 0.0021;       // rad of aim per mouse pixel
+  private static readonly AIM_LEASH = 1.75;        // max angle between nose and aim point (100 deg)
+
+  /** Moves the aim point with the mouse, then returns the stick commands that fly the nose onto it. */
+  private aimStep(inp: Input, dt: number): { pitch: number; roll: number; yaw: number } {
+    const m = this.player.model, f = _af, q = _aq.copy(m.q).invert();
+    m.forward(f);
+    const keys = inp.held('pitchUp') || inp.held('pitchDown') || inp.held('rollLeft') || inp.held('rollRight') || inp.held('yawLeft') || inp.held('yawRight');
+    if (!this.aimReady || keys) { this.aimYaw = Math.atan2(f.x, -f.z); this.aimPitch = Math.asin(clamp(f.y, -1, 1)); this.aimReady = true; }
+    else {
+      this.aimYaw += inp.mouseDX * FlightSession.AIM_SENS;
+      this.aimPitch = clamp(this.aimPitch - inp.mouseDY * FlightSession.AIM_SENS * (this.o.settings.data.invertPitch ? -1 : 1), -1.35, 1.35);
+    }
+    const setDir = () => this.aimDir.set(Math.sin(this.aimYaw) * Math.cos(this.aimPitch), Math.sin(this.aimPitch), -Math.cos(this.aimYaw) * Math.cos(this.aimPitch));
+    setDir();
+    const ang = f.angleTo(this.aimDir);
+    if (ang > FlightSession.AIM_LEASH) {                       // the aim point cannot run away behind the jet
+      _ab.copy(f).lerp(this.aimDir, FlightSession.AIM_LEASH / ang).normalize(); this.aimDir.copy(_ab);
+      this.aimYaw = Math.atan2(this.aimDir.x, -this.aimDir.z); this.aimPitch = Math.asin(clamp(this.aimDir.y, -1, 1));
+    }
+    // aim point in the aircraft frame: x right, y up, -z ahead
+    const b = _ab.copy(this.aimDir).applyQuaternion(q);
+    const err = Math.acos(clamp(-b.z, -1, 1));               // angle between nose and aim point
+    const yawErr = Math.atan2(b.x, -b.z), pitchErr = Math.atan2(b.y, Math.hypot(b.x, b.z));
+    const w = clamp((err - 0.02) / 0.1, 0, 1);               // 0 = fine tracking (<1 deg), 1 = bank-and-pull (>7 deg)
+    const phi = Math.atan2(b.x, b.y);                        // 0 = aim point straight above the jet's lift vector
+    const right = _ar.set(1, 0, 0).applyQuaternion(m.q);
+    const level = clamp(right.y * 2.2, -1, 1);               // roll back to wings level when tracking finely
+    const rollBig = clamp(phi * 1.8, -1, 1);
+    const fineRoll = clamp(yawErr * 4, -0.5, 0.5);
+    const roll = (1 - w) * (0.55 * level + fineRoll) + w * rollBig;
+    const pitchBig = clamp(Math.cos(phi) * err * 4.0, -1, 1) * (b.y > -0.2 ? 1 : 0.6);
+    const pitchFine = clamp(pitchErr * 6, -1, 1);
+    const pitch = (1 - w) * pitchFine + w * pitchBig;
+    const yaw = clamp(yawErr * 2.5, -0.8, 0.8) * (1 - 0.7 * w);
+    void dt;
+    return { pitch: clamp(pitch, -1, 1), roll: clamp(roll, -1, 1), yaw };
+  }
+
+  /** Screen position of a direction from the player's jet (clamped to the screen when behind / off to the side). */
+  private projectDir(dir: THREE.Vector3): { x: number; y: number } {
+    const cam = this.o.camera.camera, W = window.innerWidth, H = window.innerHeight;
+    _ap.copy(this.player.model.pos).addScaledVector(dir, 2500).project(cam);
+    let nx = _ap.x, ny = _ap.y;
+    if (_ap.z > 1) { nx = -nx; ny = -ny; }
+    const k = Math.max(1, Math.abs(nx) / 0.94, Math.abs(ny) / 0.9); nx /= k; ny /= k;
+    return { x: (nx * 0.5 + 0.5) * W, y: (-ny * 0.5 + 0.5) * H };
   }
 
   flash(text: string, secs: number) { this.weaponMsg = text; this.weaponMsgT = secs; }
@@ -624,7 +672,7 @@ export class FlightSession {
       debug: this.debug ? this.debugLines() : null, weaponMsg: this.weaponMsg, freeLook: cam.freeLook,
       guidance: { dirNorth: info.dirNorth, dz: info.dz, lateral: info.lateral, gsError: info.gsError, show: showILS }, helpKeys: '',
       assist: this.assists.describe(),
-      mouse: this.mouseNorm && cam.view !== 'flyby' ? { x: window.innerWidth / 2 + this.mouseNorm.x * Math.min(window.innerWidth, window.innerHeight) * 0.38, y: window.innerHeight / 2 + this.mouseNorm.y * Math.min(window.innerWidth, window.innerHeight) * 0.38, r: Math.min(window.innerWidth, window.innerHeight) * 0.38 * 0.06 } : null,
+      mouse: this.mouseNorm && this.aimReady && cam.view !== 'flyby' ? (() => { const a = this.projectDir(this.aimDir), n = this.projectDir(this.player.model.forward(_hv)); return { x: a.x, y: a.y, nx: n.x, ny: n.y, r: 10 }; })() : null,
     });
   }
 
@@ -688,7 +736,7 @@ export class FlightSession {
     ];
   }
 
-  pause() { this.paused = true; this.o.audio.setGun(false); this.o.audio.setLockTone('NONE'); this.o.audio.setWarning('none'); this.o.dialogue.pause(); this.o.input.reset(); }
+  pause() { this.paused = true; this.o.audio.setGun(false); this.o.audio.setLockTone('NONE'); this.o.audio.setWarning('none'); this.o.dialogue.pause(); this.o.input.reset(); try { document.exitPointerLock?.(); } catch { /* not locked */ } }
   resume() { this.paused = false; this.o.dialogue.resume(); this.o.input.reset(); this.accum = 0; }
 
   dispose() {

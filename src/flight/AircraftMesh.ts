@@ -52,12 +52,25 @@ export function plate(points: [number, number][], thick: number, y = 0): THREE.B
   return g;
 }
 
+/** Subtle panel seams in object space (the supplied meshes have no UVs): fine transverse and longitudinal lines that darken the paint. */
+function withPanelSeams<T extends THREE.MeshStandardMaterial>(mat: T, scaleZ = 2.2, scaleX = 1.7): T {
+  mat.onBeforeCompile = sh => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vObjP;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvObjP = position;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vObjP;\nfloat seam(float v, float s){ float q = abs(fract(v / s - 0.5) - 0.5) * s; return 1.0 - smoothstep(0.0, max(fwidth(v) * 1.4, 1e-4), q); }')
+      .replace('#include <color_fragment>', '#include <color_fragment>\n float sm = max(seam(vObjP.z, ' + scaleZ.toFixed(2) + ') * 0.9, seam(vObjP.x, ' + scaleX.toFixed(2) + ') * 0.6); diffuseColor.rgb *= 1.0 - 0.22 * sm;');
+  };
+  mat.customProgramCacheKey = () => 'seams' + scaleZ + scaleX;
+  return mat;
+}
+const paint = (color: number, metalness: number, roughness: number) => withPanelSeams(new THREE.MeshPhysicalMaterial({ color, metalness, roughness, clearcoat: 0.6, clearcoatRoughness: 0.28, envMapIntensity: 1.15 }));
+
 export const MAT = {
-  hullSu: () => new THREE.MeshStandardMaterial({ color: 0x6f7885, metalness: 0.55, roughness: 0.42 }),
-  hullF35: () => new THREE.MeshStandardMaterial({ color: 0x80868f, metalness: 0.45, roughness: 0.5 }),
-  hullDrone: () => new THREE.MeshStandardMaterial({ color: 0x23262c, metalness: 0.3, roughness: 0.65 }),
+  hullSu: () => paint(0x6f7885, 0.55, 0.4),
+  hullF35: () => paint(0x80868f, 0.45, 0.46),
+  hullDrone: () => paint(0x23262c, 0.3, 0.6),
   dark: () => new THREE.MeshStandardMaterial({ color: 0x15171b, metalness: 0.4, roughness: 0.55 }),
-  canopy: () => new THREE.MeshStandardMaterial({ color: 0x2a3a4a, metalness: 0.9, roughness: 0.08, transparent: true, opacity: 0.38 }),
+  canopy: () => new THREE.MeshPhysicalMaterial({ color: 0x2a3a4a, metalness: 0.15, roughness: 0.03, transparent: true, opacity: 0.55, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 2.2 }),
   nozzle: () => new THREE.MeshStandardMaterial({ color: 0x3a3028, metalness: 0.8, roughness: 0.45 }),
 };
 

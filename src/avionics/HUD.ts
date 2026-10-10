@@ -34,7 +34,7 @@ export interface HudInput {
   freeLook: boolean;
   guidance: { dirNorth: boolean; dz: number; lateral: number; gsError: number; show: boolean } | null;
   helpKeys: string;
-  mouse: { x: number; y: number; r: number } | null;   // mouse-aim cursor (px) and its dead-zone radius
+  mouse: { x: number; y: number; nx: number; ny: number; r: number } | null;   // mouse-aim cursor (px) and its dead-zone radius
   assist: string | null;                               // active voice/autopilot assist
 }
 
@@ -497,14 +497,18 @@ export class HUD {
     g.restore();
   }
 
-  /** Mouse-aim: cursor marker + line from the screen centre; the nose follows the cursor. */
+  /** Mouse-aim: the aim point (where the pointer sends the nose) and the nose marker that is flown onto it. */
   private drawMouse(s: HudInput) {
-    const g = this.g, m = s.mouse!, cx = this.W / 2, cy = this.H / 2;
-    g.save(); g.strokeStyle = AMBER; g.lineWidth = 1.5; g.globalAlpha = 0.9;
-    g.beginPath(); g.arc(cx, cy, m.r, 0, Math.PI * 2); g.globalAlpha = 0.25; g.stroke(); g.globalAlpha = 0.9;
-    g.beginPath(); g.moveTo(cx, cy); g.lineTo(m.x, m.y); g.stroke();
-    g.beginPath(); g.arc(m.x, m.y, 9, 0, Math.PI * 2); g.moveTo(m.x - 15, m.y); g.lineTo(m.x - 5, m.y); g.moveTo(m.x + 5, m.y); g.lineTo(m.x + 15, m.y); g.moveTo(m.x, m.y - 15); g.lineTo(m.x, m.y - 5); g.moveTo(m.x, m.y + 5); g.lineTo(m.x, m.y + 15); g.stroke();
-    g.fillStyle = AMBER; g.font = '11px Consolas, monospace'; g.textAlign = 'center'; g.fillText('MOUSE-AIM', cx, cy + m.r + 14); g.restore();
+    const g = this.g, m = s.mouse!;
+    const dist = Math.hypot(m.x - m.nx, m.y - m.ny);
+    g.save(); g.strokeStyle = AMBER; g.fillStyle = AMBER; g.lineWidth = 1.6;
+    if (dist > 14) { g.globalAlpha = 0.45; g.setLineDash([5, 5]); g.beginPath(); g.moveTo(m.nx, m.ny); g.lineTo(m.x, m.y); g.stroke(); g.setLineDash([]); }
+    g.globalAlpha = 0.95;
+    g.beginPath(); g.arc(m.x, m.y, 11, 0, Math.PI * 2); g.moveTo(m.x - 18, m.y); g.lineTo(m.x - 8, m.y); g.moveTo(m.x + 8, m.y); g.lineTo(m.x + 18, m.y); g.moveTo(m.x, m.y - 18); g.lineTo(m.x, m.y - 8); g.moveTo(m.x, m.y + 8); g.lineTo(m.x, m.y + 18); g.stroke();
+    g.beginPath(); g.arc(m.x, m.y, 1.8, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.moveTo(m.nx - 7, m.ny); g.lineTo(m.nx + 7, m.ny); g.moveTo(m.nx, m.ny - 7); g.lineTo(m.nx, m.ny + 7); g.stroke();
+    g.font = '11px Consolas, monospace'; g.textAlign = 'center'; g.fillText('MOUSE-AIM', m.x, m.y + 32);
+    g.restore();
   }
 
   private drawDebug(s: HudInput) {
