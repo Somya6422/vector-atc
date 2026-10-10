@@ -33,7 +33,25 @@ async function loadOne(who: 'boy' | 'girl', loader: GLTFLoader) {
   cache.set(who, { geometry: g, material: mat, height: h });
 }
 
+/** Textured jet for the girl's hangar bay (Meshy .blend from the project owner → public/models/jet_girl.glb). */
+let hangarJet: THREE.Group | null = null;
+export const getHangarJet = () => hangarJet?.clone() ?? null;
+async function loadHangarJet(loader: GLTFLoader) {
+  const gltf = await loader.loadAsync(`${import.meta.env.BASE_URL}models/jet_girl.glb`);
+  const root = gltf.scene; root.updateMatrixWorld(true);
+  root.rotation.y = -Math.PI / 2;                              // model nose points -X; aircraft face -Z
+  const g = new THREE.Group(); g.add(root); g.updateMatrixWorld(true);
+  const bb = new THREE.Box3().setFromObject(g), size = bb.getSize(new THREE.Vector3());
+  const k = 15.7 / Math.max(size.x, size.z);                     // F-35 length
+  root.scale.setScalar(k); g.updateMatrixWorld(true);
+  const b2 = new THREE.Box3().setFromObject(g);
+  root.position.set(-(b2.min.x + b2.max.x) / 2, -b2.min.y, -(b2.min.z + b2.max.z) / 2);
+  g.traverse(o => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; m.geometry.userData.shared = true; } });
+  hangarJet = g;
+}
+
 export async function loadPilotModels(): Promise<void> {
   const loader = new GLTFLoader();
+  await loadHangarJet(loader).catch(e => console.warn('jet_girl.glb unavailable – using the F-35 model', e));
   await Promise.all((['boy', 'girl'] as const).map(w => loadOne(w, loader).catch(e => console.warn(`pilot_${w}.glb unavailable – using the older pilot sculpt`, e))));
 }

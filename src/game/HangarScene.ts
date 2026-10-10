@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { getHangarJet } from '../characters/PilotModels';
 import { Avatar } from '../characters/Avatar';
 import { buildAircraft } from '../flight/AircraftMesh';
 import type { Route } from '../persistence/SaveManager';
@@ -77,6 +78,8 @@ export class HangarScene {
     const f35Jet = buildAircraft('F35', { girlPilot: true }); f35Jet.group.position.set(9, 2.0, -5); f35Jet.group.rotation.y = -0.5; s.add(f35Jet.group);
     const lc = LIVERY_COLORS[livery]; if (lc) (playerIsBoy ? suJet : f35Jet).setLivery(lc);
     for (const v of [suJet, f35Jet]) { v.cockpit.visible = false; v.afterburners.forEach(a => (a.visible = false)); }
+    const girlJet = getHangarJet();
+    if (girlJet) { f35Jet.group.visible = false; girlJet.position.set(9, 0, -5); girlJet.rotation.y = -0.5; s.add(girlJet); }   // textured model in the girl's bay
     // chocks / tow bars
     // ---- jacket ----
     this.jacket = new THREE.Group(); this.jacket.position.set(JACKET.x, 0.95, JACKET.z + 0.7);
