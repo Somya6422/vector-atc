@@ -92,10 +92,11 @@ export class Game {
       this.audio.uiClick();
       this.voice.say(this.session.voiceExec(c));
     };
+    this.pilotBar.onDialOpen = () => { try { document.exitPointerLock?.(); } catch { /* not locked */ } };
     window.setInterval(() => {
       const on = !!this.session && this.fsm.inFlight && !this.session.paused;
       this.pilotBar.setVisible(on || (this.pilotBar.guideOpen && !!this.session));
-      if (on) { const g = this.session!.guide(); this.pilotBar.update(g.step, g.buttons); }
+      if (on) { const g = this.session!.guide(); this.pilotBar.update(g.step, g.buttons); this.pilotBar.placeSquad(this.session!.mfdMode === 'full' ? this.hud.commsRect : null); }
     }, 250);
     this.ui.onSetting = (k, v) => { this.settings.set(k, v); this.applySettings(); };
     this.settings.onChange(() => this.applySettings());
@@ -161,6 +162,7 @@ export class Game {
     if (this.rebinding) return false;
     if (this.voice?.focused) return false;
     if (code === bindings.code('voice') && (this.fsm.inFlight || st === 'HANGAR' || st === 'PAUSED' || !(document.activeElement instanceof HTMLButtonElement))) { this.voice.focus(); return true; }
+    if (code === bindings.code('radial') && this.session && this.fsm.inFlight) { this.pilotBar.toggleDial(); return true; }
     if (code === bindings.code('guide') && this.session && (this.fsm.inFlight || st === 'PAUSED')) { this.pilotBar.toggleGuide(); return true; }
     if (code === bindings.code('voiceMic')) { this.voice.toggleMic(); return true; }
     if (code === 'Escape' || code === bindings.code('pause')) {
@@ -327,6 +329,7 @@ export class Game {
         onEnd: r => { window.setTimeout(() => { if (this.fsm.inFlight) this.onMissionEnd(r); }, 0); },
         onPause: w => this.requestPause(w),
         onVoiceMessage: s => this.voice.say(s),
+        micOn: () => this.voice.listening,
         onStatus: s => { if (s === 'phase:P2_TRANSIT' && this.fsm.state === 'TAKEOFF') this.fsm.go('ACTIVE_MISSION'); },
       });
       this.cam.resize(window.innerWidth, window.innerHeight);

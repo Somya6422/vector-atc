@@ -12,13 +12,14 @@ export interface SettingsData {
   debug: boolean;
   mouseGun: boolean;
   mouseFlight: boolean;      // nose follows the mouse cursor
+  fbw: boolean;              // fly-by-wire: AoA limiter + automatic ground-collision recovery in manual flight
   voiceAutoSend: boolean;    // send dictated (burst) text without pressing Enter
   voiceKeepFocus: boolean;   // keep the command field focused after sending (voice-only play)
 }
 
 export const DEFAULT_SETTINGS: SettingsData = {
   master: 0.8, engines: 0.7, weapons: 0.8, dialogue: 0.9, radio: 0.8, music: 0.35, environment: 0.6,
-  voice: true, subtitleSize: 1, quality: 'medium', difficulty: 'normal', invertPitch: false, metric: false, hintLevel: 1, debug: false, mouseGun: true, mouseFlight: false, voiceAutoSend: true, voiceKeepFocus: false,
+  voice: true, subtitleSize: 1, quality: 'medium', difficulty: 'normal', invertPitch: false, metric: false, hintLevel: 1, debug: false, mouseGun: true, mouseFlight: false, fbw: true, voiceAutoSend: true, voiceKeepFocus: false,
 };
 const KEY = 'vantage-zero.settings.v1';
 
@@ -39,7 +40,7 @@ export class Settings {
     if (!raw || typeof raw !== 'object') return out;
     const r = raw as Record<string, unknown>;
     for (const k of ['master', 'engines', 'weapons', 'dialogue', 'radio', 'music', 'environment'] as const) if (typeof r[k] === 'number' && Number.isFinite(r[k])) out[k] = Math.max(0, Math.min(1, r[k] as number));
-    for (const k of ['voice', 'invertPitch', 'metric', 'debug', 'mouseGun', 'mouseFlight', 'voiceAutoSend', 'voiceKeepFocus'] as const) if (typeof r[k] === 'boolean') out[k] = r[k] as boolean;
+    for (const k of ['voice', 'invertPitch', 'metric', 'debug', 'mouseGun', 'mouseFlight', 'fbw', 'voiceAutoSend', 'voiceKeepFocus'] as const) if (typeof r[k] === 'boolean') out[k] = r[k] as boolean;
     if (typeof r.subtitleSize === 'number') out.subtitleSize = Math.max(0.8, Math.min(1.6, r.subtitleSize));
     if (r.quality === 'low' || r.quality === 'medium' || r.quality === 'high') out.quality = r.quality;
     if (r.difficulty === 'easy' || r.difficulty === 'normal' || r.difficulty === 'hard') out.difficulty = r.difficulty;

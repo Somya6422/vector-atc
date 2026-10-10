@@ -63,11 +63,21 @@ function withPanelSeams<T extends THREE.MeshStandardMaterial>(mat: T, scaleZ = 2
   mat.customProgramCacheKey = () => 'seams' + scaleZ + scaleX;
   return mat;
 }
-const paint = (color: number, metalness: number, roughness: number) => withPanelSeams(new THREE.MeshPhysicalMaterial({ color, metalness, roughness, clearcoat: 0.6, clearcoatRoughness: 0.28, envMapIntensity: 1.15 }));
+const paint = (color: number, metalness: number, roughness: number, clearcoat = 0.6) => withPanelSeams(new THREE.MeshPhysicalMaterial({ color, metalness, roughness, clearcoat, clearcoatRoughness: 0.28, envMapIntensity: 1.15 }));
+
+/** Soft radial glow for the exhaust bloom sprites (plain texture headless). */
+function glowTex(): THREE.Texture {
+  if (typeof document === 'undefined') return new THREE.Texture();
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d')!, gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.25, 'rgba(255,200,140,0.75)'); gr.addColorStop(1, 'rgba(255,120,40,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+}
 
 export const MAT = {
   hullSu: () => paint(0x6f7885, 0.55, 0.4),
-  hullF35: () => paint(0x80868f, 0.45, 0.46),
+  hullF35: () => paint(0x7c828b, 0.15, 0.72, 0.12),   // radar-absorbent matte
   hullDrone: () => paint(0x23262c, 0.3, 0.6),
   dark: () => new THREE.MeshStandardMaterial({ color: 0x15171b, metalness: 0.4, roughness: 0.55 }),
   canopy: () => new THREE.MeshPhysicalMaterial({ color: 0x2a3a4a, metalness: 0.15, roughness: 0.03, transparent: true, opacity: 0.55, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 2.2 }),
@@ -96,6 +106,10 @@ export interface AircraftVisual {
   /** under-wing missiles (hidden as they are fired) and the anti-collision strobes */
   stores: THREE.Object3D[];
   strobes: THREE.Mesh[];
+  /** additive exhaust glow (afterburner bloom) at each nozzle */
+  glows: THREE.Sprite[];
+  /** transonic vapour cone (shown near Mach 1) */
+  vaporCone: THREE.Mesh;
   navLights: THREE.Mesh[];
   cockpit: THREE.Group;       // interior – shown only in cockpit view
   exterior: THREE.Group;      // everything else
@@ -283,6 +297,14 @@ export function buildAircraft(id: AircraftId, opts: { girlPilot?: boolean } = {}
     }
   }
   for (const sx of [-1, 1]) { const s = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffffff })); s.position.set(sx * (id === 'DRONE' ? 0.8 : 1.9), id === 'DRONE' ? 1.6 : 2.9, cfgD.length * 0.36); exterior.add(s); strobes.push(s); }
+  const glows: THREE.Sprite[] = [];
+  const glowMat = new THREE.SpriteMaterial({ map: glowTex(), color: 0xffb070, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, toneMapped: false, opacity: 0 });
+  for (const f of afterburners) {
+    const gs = new THREE.Sprite(glowMat.clone()); const h = (f.geometry as THREE.ConeGeometry).parameters.height;
+    gs.position.set(f.position.x, f.position.y, f.position.z - h * 0.45); gs.scale.setScalar(2); exterior.add(gs); glows.push(gs);
+  }
+  const vaporCone = new THREE.Mesh(new THREE.ConeGeometry(cfgD.wingspan * 0.42, cfgD.length * 0.55, 28, 1, true), new THREE.MeshBasicMaterial({ color: 0xf4f8ff, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+  vaporCone.rotation.x = -Math.PI / 2; vaporCone.position.z = cfgD.length * 0.08; vaporCone.visible = false; exterior.add(vaporCone);
   for (const f of [...afterburners]) {   // bright inner core so the afterburner reads as hot white-orange
     const core = new THREE.Mesh(new THREE.ConeGeometry((f.geometry as THREE.ConeGeometry).parameters.radius * 0.45, (f.geometry as THREE.ConeGeometry).parameters.height * 0.7, 10, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff2d0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
     core.rotation.copy(f.rotation); core.position.copy(f.position); core.position.z -= (f.geometry as THREE.ConeGeometry).parameters.height * 0.1; exterior.add(core); afterburners.push(core);
@@ -294,7 +316,7 @@ export function buildAircraft(id: AircraftId, opts: { girlPilot?: boolean } = {}
   gear.visible = true;
   const hullRef = hull;
   return {
-    group, afterburners, stores, strobes, navLights, cockpit, exterior, pilotHead, gear, airbrakes,
+    group, afterburners, stores, strobes, glows, vaporCone, navLights, cockpit, exterior, pilotHead, gear, airbrakes,
     setLivery(color: number) { hullRef.color.setHex(color); },
   };
 }

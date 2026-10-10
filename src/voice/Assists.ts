@@ -1,4 +1,5 @@
 import type { Unit } from '../game/Entity';
+import { Vector3 } from 'three';
 import { Autopilot } from '../flight/Autopilot';
 import type { FlightController } from '../flight/FlightController';
 import type { MissionDirector, NavPoint } from '../missions/MissionDirector';
@@ -10,9 +11,10 @@ import { FIELD_ELEV, RUNWAY, terrainHeight, world } from '../world/Heightfield';
 import { Unit as UnitCtor } from '../game/Entity';
 
 /** The AI controllers expect a weapons system; assists never shoot, so they get an inert one. */
+const _rv = new Vector3(), _uv = new Vector3();
 const NO_WEAPONS = { threatsTo: () => [], nearestThreat: () => null, dropFlares: () => false, fireGun: () => 0, releaseTrigger: () => {}, launch: () => null } as unknown as Weapons;
 
-export type AutoMode = 'none' | 'takeoff' | 'taxi' | 'land';
+export type AutoMode = 'none' | 'takeoff' | 'taxi' | 'land' | 'recover';
 
 /**
  * Voice-driven flight assists. Voice is discrete (not a continuous stick), so spoken commands such as
@@ -43,6 +45,7 @@ export class Assists {
     if (this.auto === 'takeoff') return 'AUTO-TAKEOFF';
     if (this.auto === 'taxi') return 'TAXI ASSIST';
     if (this.auto === 'land') return 'AUTOLAND';
+    if (this.auto === 'recover') return 'AUTO-RECOVERY';
     if (!this.apActive) return null;
     const parts: string[] = [];
     if (this.nav) parts.push('NAV ' + this.nav.name);
@@ -105,12 +108,43 @@ export class Assists {
     return 'Returning to base and landing. Autoland assist is penalised in the score.';
   }
 
+  /** Panic button: roll wings level (shortest way, inverted included), unload a stall, then climb at +8 deg. */
+  startRecover(): string {
+    const m = this.player.model;
+    if (m.onGround) return 'Already on the ground.';
+    if (this.auto === 'recover') { this.off('Recovery cancelled – you have control.'); return 'Recovery cancelled.'; }
+    this.off(); this.auto = 'recover'; this.recoverStable = 0;
+    return 'Auto-recovery: wings level, nose up, full power.';
+  }
+  private recoverStable = 0;
+  private recover(dt: number) {
+    const m = this.player.model, fc = this.fc, cfg = this.player.cfg;
+    const right = _rv.set(1, 0, 0).applyQuaternion(m.q), up = _uv.set(0, 1, 0).applyQuaternion(m.q);
+    const bank = Math.atan2(right.y, up.y);                  // 0 = wings level, ±pi = inverted
+    const stalled = m.stalled || m.ias < cfg.stallSpeedKt / KT * 1.12;
+    fc.yaw = 0; fc.throttle = 1; fc.airbrake = false; fc.brakeLatch = false;
+    fc.roll = clamp(bank * 1.7, -1, 1);
+    if (stalled) fc.pitch = clamp((-12 - m.pitchDeg) * 0.06, -1, 0.1);          // unload: nose below the horizon to regain speed
+    else if (Math.abs(bank) > 0.5) fc.pitch = up.y < 0 ? 0 : 0.15;                // roll first, gentle pull only when upright
+    else fc.pitch = clamp((8 - m.pitchDeg) * 0.07, -0.6, 0.8);
+    const tav = terrainAvoid(m, this.ap, dt, 240);
+    if (tav) { fc.pitch = tav.pitch; fc.roll = tav.roll; }
+    const ok = Math.abs(bank) < 0.09 && m.pitchDeg > 0 && m.vel.y > 0 && !stalled;
+    this.recoverStable = ok ? this.recoverStable + dt : 0;
+    if (this.recoverStable > 1.5) {
+      this.auto = 'none';
+      this.engage({ hdg: m.heading * DEG, alt: Math.max(m.pos.y + 150, terrainHeight(m.pos.x, m.pos.z) + 450), gamma: null, bank: null, nav: null });
+      this.onMessage?.('Recovered. Autopilot holding heading and climbing – move the stick to take over.');
+    }
+  }
+
   // ------------------------------------------------------------------ per frame
   /** `manual` = the pilot is touching the stick/mouse/throttle: assists hand control back. */
   update(dt: number, now: number, manual: boolean, manualThrottle: boolean) {
     const m = this.player.model, fc = this.fc;
     if (!this.active) return;
     if (m.crashed) { this.off(); return; }
+    if (this.auto === 'recover') { this.recover(dt); return; }   // the panic recovery ignores stick input until it is done
     if (manual && (this.apActive || this.auto === 'land' || this.auto === 'takeoff')) { this.off('Manual control – assists off.'); return; }
     if (manualThrottle) this.speed = null;
     if (this.auto === 'taxi') { this.taxi(dt); return; }

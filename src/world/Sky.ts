@@ -1,8 +1,39 @@
 import * as THREE from 'three';
 import { BLIZZARD, WORLD, blizzardAt, cxMain, terrainHeight } from './Heightfield';
 import { Rng, clamp, lerp } from '../util/math';
+import { BIOMES, type BiomeSpec } from './Biomes';
 
 export const SUN_DIR = new THREE.Vector3(-0.45, 0.62, -0.64).normalize();
+
+/**
+ * Atmosphere: replaces three's exponential fog with height-attenuated fog (dense in the valleys, thinning with altitude),
+ * forward sun scattering (fog brightens and warms towards the sun) and ordered dithering so distant ridges do not band.
+ * Installed once, before any material compiles; every fogged material picks it up.
+ */
+function installAtmosphere() {
+  const C = THREE.ShaderChunk as unknown as Record<string, string>;
+  if (C.fog_fragment.includes('vFogWorld')) return;
+  const s = SUN_DIR;
+  C.fog_pars_vertex = '#ifdef USE_FOG\n varying float vFogDepth;\n varying vec3 vFogWorld;\n#endif';
+  C.fog_vertex = '#ifdef USE_FOG\n vFogDepth = - mvPosition.z;\n vFogWorld = transpose(mat3(viewMatrix)) * (mvPosition.xyz - viewMatrix[3].xyz);\n#endif';
+  C.fog_pars_fragment = C.fog_pars_fragment.replace('varying float vFogDepth;', 'varying float vFogDepth;\n varying vec3 vFogWorld;');
+  C.fog_fragment = `#ifdef USE_FOG
+    vec3 fogRay = vFogWorld - cameraPosition;
+    float fogDist = length(fogRay);
+    #ifdef FOG_EXP2
+      const float FALL = 0.00038; float y0 = max(cameraPosition.y - 350.0, 0.0); float dy = fogRay.y;
+      float hInt = abs(dy) > 2.0 ? (exp(-FALL * y0) - exp(-FALL * (y0 + dy))) / (FALL * dy) : exp(-FALL * y0);
+      float od = fogDensity * fogDist; float fogFactor = 1.0 - exp(- od * od * clamp(hInt, 0.04, 1.6));
+    #else
+      float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+    #endif
+    float sunAmt = pow(max(dot(fogRay / max(fogDist, 1.0), vec3(${s.x.toFixed(4)}, ${s.y.toFixed(4)}, ${s.z.toFixed(4)})), 0.0), 8.0);
+    vec3 fogTint = fogColor + vec3(0.30, 0.20, 0.08) * sunAmt * dot(fogColor, vec3(0.33));
+    fogFactor = clamp(fogFactor + (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 160.0, 0.0, 1.0);
+    gl_FragColor.rgb = mix( gl_FragColor.rgb, fogTint, fogFactor );
+  #endif`;
+}
+installAtmosphere();
 
 function softTexture(kind: 'cloud' | 'flake'): THREE.Texture {
   const c = document.createElement('canvas'); c.width = c.height = 128;
@@ -34,6 +65,8 @@ export class SkyEnvironment {
   private snowMat: THREE.ShaderMaterial;
   private fogCalm = new THREE.Color(0xa9bdd2);
   private fogStorm = new THREE.Color(0xd5dce2);
+  private biome: BiomeSpec = BIOMES.arctic;
+  private stars: THREE.Points;
   /** mission-controlled 0..1 */
   front = 0;
   /** 0..1 intensity at camera right now */
@@ -82,18 +115,38 @@ export class SkyEnvironment {
     const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
     this.snowMat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, fog: false,
-      uniforms: { uCam: { value: new THREE.Vector3() }, uTime: { value: 0 }, uAmt: { value: 0 }, uMap: { value: softTexture('flake') }, uVel: { value: new THREE.Vector3() } },
+      uniforms: { uCam: { value: new THREE.Vector3() }, uTime: { value: 0 }, uAmt: { value: 0 }, uMap: { value: softTexture('flake') }, uVel: { value: new THREE.Vector3() }, uTint: { value: new THREE.Color(0xffffff) } },
       vertexShader: `uniform vec3 uCam; uniform float uTime; uniform float uAmt; uniform vec3 uVel; varying float vA;
         void main(){ vec3 box = vec3(160.0, 100.0, 160.0); vec3 p = position*box;
           p += vec3(-uTime*12.0 - uVel.x*0.0, -uTime*9.0, uTime*5.0) * (0.6 + position.x);
           vec3 w = mod(p - uCam + box*0.5, box) - box*0.5; vec4 mv = viewMatrix*vec4(uCam + w, 1.0);
           float d = length(w); vA = uAmt * smoothstep(box.x*0.5, 10.0, d) * step(position.y, uAmt);
           gl_PointSize = 220.0/(1.0+d*0.8); gl_Position = projectionMatrix*mv; }`,
-      fragmentShader: 'uniform sampler2D uMap; varying float vA; void main(){ vec4 t = texture2D(uMap, gl_PointCoord); gl_FragColor = vec4(1.0,1.0,1.0,t.a*vA*0.8); }',
+      fragmentShader: 'uniform sampler2D uMap; uniform vec3 uTint; varying float vA; void main(){ vec4 t = texture2D(uMap, gl_PointCoord); gl_FragColor = vec4(uTint,t.a*vA*0.8); }',
     });
     this.snow = new THREE.Points(sg, this.snowMat);
     this.snow.frustumCulled = false;
     this.group.add(this.snow);
+    // stars for night theatres (on a dome around the camera)
+    const NS = 1400, stp = new Float32Array(NS * 3), r3 = new Rng(31);
+    for (let i = 0; i < NS; i++) { const u = r3.next() * 2 - 1, a = r3.next() * Math.PI * 2, y = Math.abs(u) * 0.95 + 0.05, rr = Math.sqrt(1 - y * y); stp[i * 3] = Math.cos(a) * rr * 40000; stp[i * 3 + 1] = y * 40000; stp[i * 3 + 2] = Math.sin(a) * rr * 40000; }
+    const stg = new THREE.BufferGeometry(); stg.setAttribute('position', new THREE.BufferAttribute(stp, 3));
+    this.stars = new THREE.Points(stg, new THREE.PointsMaterial({ color: 0xdfe6ff, size: 2, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.85, depthWrite: false }));
+    this.stars.frustumCulled = false; this.stars.visible = false; this.stars.renderOrder = -9;
+    this.group.add(this.stars);
+  }
+
+  /** Switches sky colours, light, fog haze, clouds and weather particles to a theatre preset. */
+  applyBiome(b: BiomeSpec) {
+    this.biome = b; const s = b.sky;
+    (this.skyMat.uniforms.uTop.value as THREE.Color).set(s.top);
+    (this.skyMat.uniforms.uHor.value as THREE.Color).set(s.horizon);
+    (this.skyMat.uniforms.uStormCol.value as THREE.Color).set(s.fogStorm);
+    this.fogCalm.set(s.fogCalm); this.fogStorm.set(s.fogStorm); this.fog.color.set(s.fogCalm);
+    this.sun.color.set(s.sunColor); this.hemi.color.set(s.hemiSky); this.hemi.groundColor.set(s.hemiGround);
+    (this.snowMat.uniforms.uTint.value as THREE.Color).set(b.particles);
+    this.stars.visible = s.stars;
+    (this.clouds.material as THREE.PointsMaterial).color.set(s.stars ? 0x2a2440 : b.id === 'desert' ? 0xf6eadc : 0xf2f5f8);
   }
 
   update(dt: number, cam: THREE.Camera, aircraftPos: THREE.Vector3) {
@@ -101,7 +154,7 @@ export class SkyEnvironment {
     this.localIntensity = blizzardAt(aircraftPos.x, aircraftPos.z, this.front);
     const outside = lerp(30000, 9000, this.front);
     this.visibility = lerp(outside, 260, this.localIntensity);
-    const targetDens = Math.sqrt(3) / this.visibility;
+    const targetDens = Math.sqrt(3) / this.visibility * this.biome.sky.fogScale;
     this.fog.density += (targetDens - this.fog.density) * clamp(dt * 1.5, 0, 1);
     this.fog.color.copy(this.fogCalm).lerp(this.fogStorm, clamp(this.front * 0.5 + this.localIntensity, 0, 1));
     this.skyMat.uniforms.uStorm.value = clamp(this.front * 0.45 + this.localIntensity * 0.55, 0, 1);
@@ -109,11 +162,13 @@ export class SkyEnvironment {
     this.snowMat.uniforms.uCam.value.copy(cam.position);
     this.snowMat.uniforms.uTime.value = this.t;
     this.snowMat.uniforms.uAmt.value = clamp(this.localIntensity * 1.3 + (this.front > 0 ? 0.06 : 0), 0, 1);
-    this.hemi.intensity = lerp(0.9, 0.55, this.localIntensity);
-    this.sun.intensity = lerp(3.0, 0.8, clamp(this.front * 0.5 + this.localIntensity, 0, 1));
+    const sk = this.biome.sky;
+    this.hemi.intensity = lerp(sk.hemiIntensity, sk.hemiIntensity * 0.6, this.localIntensity);
+    this.sun.intensity = lerp(sk.sunIntensity, sk.sunIntensity * 0.27, clamp(this.front * 0.5 + this.localIntensity, 0, 1));
     this.group.position.set(0, 0, 0);
     // keep the sky dome centred on the camera
     (this.group.children[0] as THREE.Mesh).position.copy(cam.position);
+    this.stars.position.copy(cam.position);
     // shadows follow the player aircraft
     this.sun.target.position.copy(aircraftPos);
     this.sun.position.copy(aircraftPos).addScaledVector(SUN_DIR, 1500);

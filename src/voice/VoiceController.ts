@@ -141,5 +141,7 @@ export class VoiceController {
     rec.onend = () => { if (this.micOn) window.setTimeout(() => { try { rec.start(); } catch { /* already running */ } }, 250); };
     try { rec.start(); this.micOn = true; this.micBtn.classList.add('on'); this.micBtn.textContent = 'MIC ●'; this.say('🎙 Listening (browser microphone).'); } catch { this.say('✗ Could not start the microphone.'); }
   }
+  /** true while the browser speech recogniser is listening */
+  get listening() { return this.micOn; }
   stopMic() { this.micOn = false; try { this.rec?.stop(); } catch { /* ignore */ } this.rec = null; this.micBtn.classList.remove('on'); this.micBtn.textContent = 'MIC'; this.input.placeholder = ''; }
 }

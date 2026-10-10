@@ -130,7 +130,7 @@ export class UI {
       const r = save.missions[id];
       return `<div class="mrow ui-panel"><div><h3>${name}</h3><p>${desc}</p><small>${r ? `Best grade <b>${r.grade}</b> · best score ${r.bestScore} · plays ${r.plays} · last: ${r.lastOutcome}` : 'Not yet flown'}</small></div><button data-a="select_mission" data-p="${id}">${r ? 'Replay' : 'Fly'}</button></div>`;
     };
-    const rows = (['m01', 'm02', 'm03', 'school'] as MissionId[]).map(id => row(id, MISSIONS[id].label, MISSIONS[id].menu)).join('');
+    const rows = (['m01', 'm02', 'm03', 'survival', 'school'] as MissionId[]).map(id => row(id, MISSIONS[id].label, MISSIONS[id].menu)).join('');
     this.mount(`<h2 class="center">MISSION SELECTION</h2><div class="mlist">${rows}</div><div class="center"><button data-a="main_menu" class="sec">Back</button></div>`, 'wide');
   }
 
@@ -177,7 +177,7 @@ export class UI {
           <label>Difficulty <select data-s="difficulty"><option value="easy" ${s.difficulty === 'easy' ? 'selected' : ''}>Easy · tougher jet, slower enemies</option><option value="normal" ${s.difficulty === 'normal' ? 'selected' : ''}>Normal</option><option value="hard" ${s.difficulty === 'hard' ? 'selected' : ''}>Hard · fragile jet, sharper enemies</option></select> <small>applies to the next mission</small></label>
           <label>Ground Control hints <select data-s="hintLevel"><option value="0" ${s.hintLevel === 0 ? 'selected' : ''}>Off</option><option value="1" ${s.hintLevel === 1 ? 'selected' : ''}>1 · Subtle</option><option value="2" ${s.hintLevel === 2 ? 'selected' : ''}>2 · Helpful</option><option value="3" ${s.hintLevel === 3 ? 'selected' : ''}>3 · Direct</option></select></label>
           <label>Subtitle size<input type="range" min="0.8" max="1.6" step="0.1" value="${s.subtitleSize}" data-s="subtitleSize"><output>${s.subtitleSize.toFixed(1)}×</output></label>
-          ${toggle('mouseFlight', 'Mouse-aim flight (nose follows the cursor)')}${toggle('voiceAutoSend', 'Voice: auto-send dictated commands (Wispr Flow) without pressing Enter')}${toggle('voiceKeepFocus', 'Voice-only mode: keep the command field focused after each command')}${toggle('invertPitch', 'Invert pitch (reverses the nose up / nose down keys and mouse)')}${toggle('metric', 'Altitude in metres')}${toggle('mouseGun', 'Left mouse button fires cannon')}${toggle('debug', 'Debug mode (overlay with `, dev shortcuts)')}
+          ${toggle('mouseFlight', 'Mouse-aim flight (nose follows the cursor)')}${toggle('fbw', 'Fly-by-wire assist: AoA limiter + auto ground-collision recovery')}${toggle('voiceAutoSend', 'Voice: auto-send dictated commands (Wispr Flow) without pressing Enter')}${toggle('voiceKeepFocus', 'Voice-only mode: keep the command field focused after each command')}${toggle('invertPitch', 'Invert pitch (reverses the nose up / nose down keys and mouse)')}${toggle('metric', 'Altitude in metres')}${toggle('mouseGun', 'Left mouse button fires cannon')}${toggle('debug', 'Debug mode (overlay with `, dev shortcuts)')}
           <h3>Save</h3><button data-a="save">Save now</button> <button data-a="reset_save" class="danger">Erase campaign…</button>
         </div>
       </div>

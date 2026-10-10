@@ -11,9 +11,11 @@ import type { WeaponId } from '../combat/WeaponSpecs';
 import { BanditAI } from '../ai/BanditAI';
 import { WingmanAI, type WingmanCall } from '../ai/WingmanAI';
 import { MissionDirector, type MissionHost, type MissionId, type MissionResult, type Phase } from '../missions/MissionDirector';
-import { FIELD_ELEV, RUNWAY, START_POS, WAYPOINTS, blizzardAt, cxMain, minClearanceAlong, resetBlizzard, terrainHeight, world } from '../world/Heightfield';
+import { FIELD_ELEV, RADAR_SITES, RUNWAY, START_POS, WORLD, WAYPOINTS, blizzardAt, cxMain, minClearanceAlong, resetBlizzard, terrainHeight, world } from '../world/Heightfield';
 import { approachInfo, chooseRunwayDirection } from '../world/Landing';
-import { HUD, type CameraView, type HudWarnings } from '../avionics/HUD';
+import { HUD, type CameraView, type HudWarnings, type MfdMode } from '../avionics/HUD';
+import { Autopilot } from '../flight/Autopilot';
+import { terrainAvoid } from '../ai/Maneuvers';
 import { CameraRig, VIEW_LABEL } from './CameraRig';
 import { bindings, keyName } from './Bindings';
 import { Assists } from '../voice/Assists';
@@ -40,6 +42,8 @@ export interface SessionOptions {
   onPause: (what: 'pause' | 'map') => void;
   onStatus?: (s: string) => void;
   onVoiceMessage?: (s: string) => void;
+  /** true while the browser microphone is listening (comms MFD indicator) */
+  micOn?: () => boolean;
 }
 
 /** One mission run: units, AI, weapons, director, camera/HUD feed. Destroyed completely when the mission ends or restarts. */
@@ -78,6 +82,14 @@ export class FlightSession {
   private warnings: HudWarnings;
   private alertedBandits = false;
   private wave2At = 0;
+  // ---- fly-by-wire + cockpit systems ----
+  mfdMode: MfdMode = 'full';
+  private egt = 20;
+  private fbwGcas = false;
+  private aoaLimited = false;
+  private fbwAp = new Autopilot();
+  /** supply drops / pickups shown on the TSA map (used by wave survival) */
+  pickups: { x: number; y: number; z: number; label: string }[] = [];
   private disposers: (() => void)[] = [];
   private lastWingState = '';
   private crashHandled = false;
@@ -102,6 +114,8 @@ export class FlightSession {
       this.drones.push(d); this.units.push(d);
     }
     // ---- visuals ----
+    o.scene.applyBiome(MISSIONS[o.missionId].biome);
+    o.hud.invalidateTopo();
     o.scene.flightScene.add(this.root);
     for (const u of this.units) {
       const v = buildAircraft(u.cfg.id, { girlPilot: u.cfg.id === 'F35' });
@@ -132,6 +146,7 @@ export class FlightSession {
     this.buildGates();
     this.wireEvents();
     this.resetPositions();
+    if (this.director.survival) this.startAirborne();
     this.warnings = { stall: false, stallWarn: false, pullUp: false, missile: null, bingo: false, lowFuel: false, damage: false, flameout: false, overG: false, interference: 0, lockedOn: false };
     resetBlizzard();
     o.dialogue.clear();
@@ -143,6 +158,14 @@ export class FlightSession {
   }
 
   // ------------------------------------------------------------------ setup
+  /** Neon theatre: buildings are solid – flying into one is a crash. */
+  private checkCityCollision() {
+    const boxes = this.o.scene.cityBoxes; if (!boxes.length) return;
+    for (const u of [this.player, this.wingman]) {
+      const m = u.model; if (m.crashed || m.onGround) continue;
+      for (const b of boxes) if (m.pos.y < b.top && Math.abs(m.pos.x - b.x) < b.hx && Math.abs(m.pos.z - b.z) < b.hz) { m.destroy('COLLISION'); break; }
+    }
+  }
   private gateMeshes: THREE.Mesh[] = [];
   private buildGates() {
     for (const g of this.director.gates) {
@@ -169,6 +192,64 @@ export class FlightSession {
     this.wingAI.state = 'HOLD';
   }
 
+  /** Arcade survival: the pair starts in the air over the valley, already in formation. */
+  private startAirborne() {
+    const z = -14000, x = cxMain(z), p = this.player.model, w = this.wingman.model;
+    p.setHeadingPlace(x, Math.max(2600, terrainHeight(x, z) + 900), z, 0, 0, 230);
+    p.onGround = false; p.gearPos = 0; p.startEngines(); p.engineN = 0.8;
+    this.fc.reset(0.8); this.fc.gearDown = false; this.autoRolled = true;
+    w.setHeadingPlace(x + 140, p.pos.y + 20, z + 160, 0, 0, 230);
+    w.onGround = false; w.gearPos = 0; w.startEngines(); w.engineN = 0.8;
+    this.wingAI.state = 'FORMATION';
+    this.director.startSurvival();
+  }
+  private spawned = 0;
+  /** Survival: wake the next `count` drones 11–15 km ahead of the player, spread across the nose, already alerted. */
+  private spawnWave(count: number) {
+    const pm = this.player.model, f = pm.forward(new THREE.Vector3()); f.y = 0; f.normalize();
+    const side = new THREE.Vector3(-f.z, 0, f.x);
+    this.alertedBandits = true;
+    for (let k = 0; k < count && this.spawned < this.drones.length; k++, this.spawned++) {
+      const d = this.drones[this.spawned];
+      const spread = (k - (count - 1) / 2) * 1800;
+      let x = pm.pos.x + f.x * (11000 + k * 900) + side.x * spread, z = pm.pos.z + f.z * (11000 + k * 900) + side.z * spread;
+      x = clamp(x, WORLD.minX + 2500, WORLD.maxX - 2500); z = clamp(z, WORLD.minZ + 3000, WORLD.maxZ - 3000);
+      const y = Math.max(terrainHeight(x, z) + 700, pm.pos.y + 200 * (k % 2 ? 1 : -1));
+      const hdg = (Math.atan2(pm.pos.x - x, -(pm.pos.z - z)) / DEG + 360) % 360;
+      d.model.setHeadingPlace(x, y, z, hdg, 0, 210);
+      d.dormant = false; if (d.visual) d.visual.group.visible = true;
+      d.model.startEngines(); d.model.engineN = 0.75;
+    }
+  }
+  private supplyMeshes: THREE.Object3D[] = [];
+  /** Survival: an amber supply canister 3.5 km ahead of the jet; fly within 160 m to collect it. */
+  private dropSupply() {
+    const pm = this.player.model, f = pm.forward(new THREE.Vector3()); f.y = 0; f.normalize();
+    const x = clamp(pm.pos.x + f.x * 3500, WORLD.minX + 1500, WORLD.maxX - 1500), z = clamp(pm.pos.z + f.z * 3500, WORLD.minZ + 1500, WORLD.maxZ - 1500);
+    const y = Math.max(terrainHeight(x, z) + 350, pm.pos.y);
+    const g = new THREE.Group(); g.position.set(x, y, z);
+    const core = new THREE.Mesh(new THREE.OctahedronGeometry(14), new THREE.MeshBasicMaterial({ color: 0xffb030, toneMapped: false }));
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(48, 2.4, 8, 40), new THREE.MeshBasicMaterial({ color: 0xffd070, transparent: true, opacity: 0.7, toneMapped: false }));
+    g.add(core, ring); this.root.add(g); this.supplyMeshes.push(g);
+    this.pickups.push({ x, y, z, label: 'SUPPLY' });
+  }
+  private updatePickups(dt: number) {
+    const p = this.player, pm = p.model, cfg = p.cfg;
+    for (let i = this.pickups.length - 1; i >= 0; i--) {
+      const pk = this.pickups[i], mesh = this.supplyMeshes[i];
+      mesh.rotation.y += dt * 1.4; (mesh.children[1] as THREE.Mesh).lookAt(pm.pos);
+      if (Math.hypot(pm.pos.x - pk.x, pm.pos.y - pk.y, pm.pos.z - pk.z) > 160) continue;
+      p.irMissiles = Math.min(cfg.irMissiles, p.irMissiles + 2); p.radarMissiles = Math.min(cfg.radarMissiles, p.radarMissiles + 2);
+      p.flares = Math.min(cfg.flares, p.flares + 16); p.gunAmmo = Math.min(cfg.gunAmmo, p.gunAmmo + 250);
+      pm.fuel = Math.min(cfg.fuelCapacity, pm.fuel + cfg.fuelCapacity * 0.35);
+      pm.health = Math.min(cfg.hullHealth, pm.health + cfg.hullHealth * 0.3);
+      this.root.remove(mesh); mesh.traverse(o => { const mm = o as THREE.Mesh; mm.geometry?.dispose(); (mm.material as THREE.Material | undefined)?.dispose(); });
+      this.pickups.splice(i, 1); this.supplyMeshes.splice(i, 1);
+      this.flash('SUPPLY COLLECTED – missiles, flares, fuel and hull topped up', 2.5); this.o.audio.uiConfirm();
+      this.director.notifySupply();
+    }
+  }
+
   private makeHost(): MissionHost {
     const s = this;
     return {
@@ -178,6 +259,8 @@ export class FlightSession {
       getFront: () => this.o.scene.sky.front,
       setFront: f => { this.o.scene.sky.front = f; },
       activateDrones: (alerted) => this.activateDrones(alerted),
+      spawnWave: n => this.spawnWave(n),
+      dropSupply: () => this.dropSupply(),
       alertDrones: () => { this.alertedBandits = true; },
       setWingmanRtb: on => { this.rtb = on; },
       wingmanLanded: () => this.wingAI.state === 'PARKED' || (this.wingman.alive && this.wingman.model.onGround && this.wingman.model.vel.length() < 1.5 && this.director?.phase === 'P5_RTB' && this.director.stats.landed),
@@ -286,6 +369,8 @@ export class FlightSession {
       while (rem > 1e-4) { const s = Math.min(rem, 0.02); this.weapons.update(s, this.elapsed); rem -= s; }
       this.targeting.update(dt);
       this.director.update(dt);
+      if (this.pickups.length) this.updatePickups(dt);
+      this.checkCityCollision();
       this.postUpdate(dt);
       o.dialogue.update(dt);
     }
@@ -342,6 +427,9 @@ export class FlightSession {
     // voice assists (autopilot / taxi / take-off / landing): any manual stick input hands control straight back
     const manual = inp.held('pitchUp') || inp.held('pitchDown') || inp.held('rollLeft') || inp.held('rollRight') || inp.held('yawLeft') || inp.held('yawRight') || (!!this.mouseNorm && Math.abs(inp.mouseDX) + Math.abs(inp.mouseDY) > 3);
     this.assists.update(dt, this.elapsed, this.assists.auto === 'taxi' ? false : manual, inp.held('throttleUp') || inp.held('throttleDown'));
+    this.flyByWire(dt);
+    if (inp.wasPressed('recover')) this.flash(this.assists.startRecover(), 2.2);
+    if (inp.wasPressed('mfd')) { this.mfdMode = this.mfdMode === 'full' ? 'clean' : 'full'; this.flash(this.mfdMode === 'full' ? 'MFDs: FULL' : 'MFDs: CLEAN HUD', 1.2); }
     if (inp.wasPressed('autopilot')) this.flash(this.assists.active ? this.voiceExec({ t: 'ap_off' }) : this.voiceExec({ t: 'level' }), 2);
     if (inp.wasPressed('mouseFlight')) { this.o.settings.set('mouseFlight', !st.mouseFlight); this.flash(this.o.settings.data.mouseFlight ? 'MOUSE-AIM ON – the nose follows the cursor' : 'MOUSE-AIM OFF – keyboard flight', 1.8); }
     if (inp.wasPressed('pause')) { this.o.onPause('pause'); return; }
@@ -435,6 +523,25 @@ export class FlightSession {
     return { pitch: clamp(pitch, -1, 1), roll: clamp(roll, -1, 1), yaw };
   }
 
+  /**
+   * Fly-by-wire for manual flight: trims the stick so the angle of attack stays below the stall, and takes control
+   * (auto-GCAS) when the predicted path hits terrain. Assist modes fly their own laws and are left alone.
+   */
+  private flyByWire(dt: number) {
+    const m = this.player.model, cfg = this.player.cfg, fc = this.fc;
+    this.aoaLimited = false;
+    if (!this.o.settings.data.fbw || m.onGround || m.crashed || this.assists.active) { this.fbwGcas = false; return; }
+    const lim = cfg.alphaCrit * 0.8;
+    if (fc.pitch > 0 && m.alpha > lim) { fc.pitch *= clamp((cfg.alphaCrit * 0.92 - m.alpha) / (cfg.alphaCrit * 0.12), 0, 1); this.aoaLimited = true; }
+    if (this.gcas || this.fbwGcas) {
+      const c = terrainAvoid(m, this.fbwAp, dt, 200);
+      if (c) {
+        if (!this.fbwGcas) this.flash('AUTO-GCAS – fly-by-wire is pulling you clear', 2.5);
+        this.fbwGcas = true; fc.pitch = c.pitch; fc.roll = c.roll; fc.throttle = Math.max(fc.throttle, 0.9);
+      } else this.fbwGcas = false;
+    }
+  }
+
   /** Screen position of a direction from the player's jet (clamped to the screen when behind / off to the side). */
   private projectDir(dir: THREE.Vector3): { x: number; y: number } {
     const cam = this.o.camera.camera, W = window.innerWidth, H = window.innerHeight;
@@ -467,6 +574,7 @@ export class FlightSession {
       case 'airbrake': fc.brakeLatch = c.on; return c.on ? 'Airbrake out.' : 'Airbrake in.';
       case 'flares': return this.weapons.dropFlares(p, this.elapsed) ? 'Flares and chaff away.' : (p.flares <= 0 ? 'Flares empty.' : 'Countermeasures recycling.');
       case 'ap_off': A.off(); fc.brakeLatch = false; return 'Autopilot off – you have control.';
+      case 'recover': return A.startRecover();
       case 'level': return needAir() ?? (A.engage({ hdg: m.heading * DEG, alt: m.pos.y, gamma: null, bank: null, nav: null }) ?? 'Wings level, holding altitude and heading.');
       case 'hold_alt': return needAir() ?? (A.engage({ alt: m.pos.y }) ?? `Holding ${Math.round(m.pos.y / 0.3048)} ft.`);
       case 'hold_hdg': return needAir() ?? (A.engage({ hdg: m.heading * DEG }) ?? `Holding heading ${Math.round(m.heading)}.`);
@@ -502,6 +610,7 @@ export class FlightSession {
       case 'wing':
         if (c.cmd === 'cover') { this.wingAI.commandCover(); this.sayKey('cmd_cover'); return 'Wingman: cover me.'; }
         if (c.cmd === 'engage') { this.wingAI.commandEngage(ts.selected ?? null); this.sayKey('cmd_engage'); return 'Wingman: engage.'; }
+        if (c.cmd === 'rtb') { this.wingAI.commandRtb(); this.o.dialogue.say({ speaker: resolveRole('W', this.o.route), text: 'Copy, heading home.', priority: 1 }); return 'Wingman: return to base.'; }
         if (c.cmd === 'rejoin') { this.wingAI.commandRejoin(); this.sayKey('cmd_rejoin'); return 'Wingman: rejoin.'; }
         { let n = 0; while (c.f && this.wingAI.formation !== c.f && n++ < 3) this.wingAI.cycleFormation(); this.sayKey('cmd_formation'); return `Formation: ${this.wingAI.formation.replace('_', ' ').toLowerCase()}.`; }
       case 'wing_report': {
@@ -635,6 +744,12 @@ export class FlightSession {
       }
       for (const a of v.airbrakes) a.rotation.x = -m.airbrakePos * 0.9;
       v.strobes.forEach(s => { s.visible = (t * 1.3) % 1 < 0.1; });
+      // afterburner bloom + transonic vapour cone
+      const flick = 0.85 + 0.15 * Math.sin(t * 53 + u.id.length);
+      v.glows.forEach(gs => { const mat = gs.material as THREE.SpriteMaterial; gs.visible = m.engineOn; mat.opacity = m.afterburner ? 0.7 * flick : 0.18 * m.engineN; gs.scale.setScalar(m.afterburner ? 3.4 * flick : 1.1 + m.engineN * 0.8); });
+      const vk = clamp(1 - Math.abs(m.mach - 0.985) / 0.055, 0, 1) * (m.pos.y < 7500 ? 1 : 0);
+      v.vaporCone.visible = vk > 0.02;
+      if (v.vaporCone.visible) { (v.vaporCone.material as THREE.MeshBasicMaterial).opacity = vk * 0.32 * (0.8 + 0.2 * Math.sin(t * 37)); v.vaporCone.scale.set(1, 0.9 + 0.1 * vk, 1); }
       const left = u.irMissiles + u.radarMissiles;
       v.stores.forEach((s, i) => { s.visible = i < left; });
       const cockpitView = u === this.player && this.o.camera.view === 'cockpit';
@@ -664,6 +779,9 @@ export class FlightSession {
     const phase = this.director.phase;
     const showILS = phase === 'P5_RTB' && !pm.onGround && info.dz < 16000 && info.dz > -800;
     const prompt = this.contextPrompt();
+    const egtTarget = pm.engineOn ? 360 + 430 * pm.engineN + (pm.afterburner ? 240 : 0) : 20;
+    this.egt += (egtTarget - this.egt) * Math.min(1, dt * 0.7);
+    const dl = o.dialogue;
     o.hud.draw({
       camera: cam.camera, player: p,
       wing: { unit: this.wingman, state: this.wingAI.state, formation: this.wingAI.formation, separation: this.wingAI.separation, interference: this.interference },
@@ -672,6 +790,11 @@ export class FlightSession {
       debug: this.debug ? this.debugLines() : null, weaponMsg: this.weaponMsg, freeLook: cam.freeLook,
       guidance: { dirNorth: info.dirNorth, dz: info.dz, lateral: info.lateral, gsError: info.gsError, show: showILS }, helpKeys: '',
       assist: this.assists.describe(),
+      bgLum: o.scene.bgLum, mfd: this.mfdMode,
+      sys: { egt: this.egt, fbw: o.settings.data.fbw, gcasActive: this.fbwGcas, aoaLimited: this.aoaLimited, recovering: this.assists.auto === 'recover' },
+      comms: { lines: dl.history.slice(-4).map(h => ({ who: h.speaker, text: h.text })), active: !!dl.current, level: dl.current?.radio ? 1 : 0.6, mic: o.micOn?.() ?? false },
+      radarSites: this.director.spec.radar === false ? [] : RADAR_SITES.map(r => ({ x: r.x, z: r.z, range: r.range })),
+      pickups: this.pickups.map(p => ({ x: p.x, z: p.z, label: p.label })),
       mouse: this.mouseNorm && this.aimReady && cam.view !== 'flyby' ? (() => { const a = this.projectDir(this.aimDir), n = this.projectDir(this.player.model.forward(_hv)); return { x: a.x, y: a.y, nx: n.x, ny: n.y, r: 10 }; })() : null,
     });
   }
@@ -705,10 +828,12 @@ export class FlightSession {
       if (d.nav[0]) btns.push({ label: 'NEXT WAYPOINT', title: 'Autopilot flies to the next waypoint', cmd: { t: 'goto_nav' } });
       btns.push({ label: fc.gearDown ? 'GEAR UP' : 'GEAR DOWN', title: 'Landing gear (G)', cmd: { t: 'gear', down: !fc.gearDown } });
       btns.push({ label: 'AUTOLAND', title: 'Land automatically (costs 300 score points)', cmd: { t: 'autoland' } });
+      btns.push({ label: 'RECOVER', title: 'Panic recovery: wings level and climb (L)', cmd: { t: 'recover' }, hot: this.gcas || m.stalled });
     }
     if (m.onGround && m.engineOn && A.auto === 'none') btns.push({ label: 'BRAKES', title: 'Toggle wheel brakes', cmd: { t: 'brake', on: !fc.brakeLatch }, on: fc.brakeLatch });
     btns.push({ label: 'CAMERA', title: 'Change camera angle (5)', cmd: { t: 'camera', next: true } });
     btns.push({ label: 'HINT', title: 'Ground Control hint (H)', cmd: { t: 'hint' } });
+    btns.push({ label: '⦿ ACTIONS', title: 'Action dial (Tab)', cmd: { t: 'radial' } });
     btns.push({ label: '? GUIDE', title: 'Quick-start guide (I)', cmd: { t: 'guide' } });
     return { step, buttons: btns };
   }
@@ -742,6 +867,7 @@ export class FlightSession {
   dispose() {
     this.ended = true;
     const sc = this.o.scene;
+    sc.applyBiome('arctic'); this.o.hud.invalidateTopo();
     sc.flightScene.remove(this.root);
     this.root.traverse(obj => {
       const m = obj as THREE.Mesh;

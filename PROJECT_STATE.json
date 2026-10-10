@@ -40,7 +40,9 @@
     "Browser (built-in Chromium/ANGLE Intel UHD): app launches, main menu, pilot selection, briefing→launch, engine start, taxi, takeoff, climb, valley transit, radar detection, interception with gun kill through the real input path, blizzard main-route and east-pass resolution, RTB landing at 114 kt, debrief, hangar, save written – OBSERVED via scripted driver (tests/browser/driver.js)",
     "Browser: pause menu, controls, map panel, camera views, chase/cockpit rendering, wingman commands 1-4, weapon cycle, hint key – OBSERVED",
     "vitest voice parser: numbers, flight, weapons, wingman, menus, chained commands – PASS",
-    "Browser (scripted): voice-only path menu → new campaign → pilot → launch → start engines → taxi → take off → waypoint nav → combat/camera/wingman/radio commands → autoland from 11 km, dictation-burst auto-send, focus/Esc handling – OBSERVED"
+    "Browser (scripted): voice-only path menu → new campaign → pilot → launch → start engines → taxi → take off → waypoint nav → combat/camera/wingman/radio commands → autoland from 11 km, dictation-burst auto-send, focus/Esc handling – OBSERVED",
+    "vitest: panic recovery (inverted, nose-low, both jets), wave survival flow (4 waves, supply drops, grading), parser additions, theatre presets, new bindings – PASS (63 tests)",
+    "browser (scripted): glass-cockpit HUD with TSA/DMS/COMMS MFDs, adaptive contrast sampling, action dial, squad RTB button, survival airborne start + supply pickup + next wave, desert and neon theatres, theatre restored to arctic after the mission – OBSERVED"
   ],
   "unverified_features": [
     "Human-feel of flight handling and combat difficulty (never played by a human tester)",
@@ -55,5 +57,10 @@
     "Real Wispr Flow dictation (no API; integration is the focused command field – burst detection is heuristic)",
     "Browser microphone recognition (Chrome/Edge only, needs internet) and spoken-command accuracy in noisy conditions"
   ],
-  "next_priority_task": "Human playtest of Mission 01 on both routes (handling, difficulty, HUD readability), then Phase 3: dynamic mission-director events, deeper relationship/story consequences and additional scenarios."
+  "next_priority_task": "Human playtest of Mission 01 on both routes (handling, difficulty, HUD readability), then Phase 3: dynamic mission-director events, deeper relationship/story consequences and additional scenarios.",
+  "unverified": [
+    "Fly-by-wire auto-GCAS and AoA limiter not exercised in a recorded flight",
+    "No human playtest of the new HUD, survival balance or neon tower collisions",
+    "Frame-rate cost of the HUD canvas shadows and 900-instance city not measured on low-end hardware"
+  ]
 }

@@ -21,6 +21,7 @@ export interface MissionStats {
   touchdownSink: number; touchdownKt: number; hardLanding: boolean; landed: boolean;
   fuelAtEnd: number; healthAtEnd: number; wingHealthAtEnd: number; wingLanded: boolean; bingo: boolean;
   shotsFired: number; hits: number; friendlyDamage: number; assistLanding: boolean; gatesPassed: number;
+  wavesCleared: number; suppliesCollected: number;
 }
 export interface MissionResult {
   completed: boolean; failReason: FailReason; score: number; maxScore: number; grade: Grade;
@@ -42,6 +43,10 @@ export interface MissionHost {
   setInterference(v: number): void;
   onPhase?(p: Phase): void;
   onObjective?(o: Objective): void;
+  /** survival: activate the next `count` dormant drones around the player */
+  spawnWave?(count: number): void;
+  /** survival: place a supply canister ahead of the player */
+  dropSupply?(): void;
 }
 
 const GRADES: [number, Grade][] = [[0.9, 'S'], [0.78, 'A'], [0.62, 'B'], [0.46, 'C'], [0.3, 'D']];
@@ -66,7 +71,7 @@ export class MissionDirector {
   readonly stats: MissionStats = {
     time: 0, kills: 0, bvrKills: 0, gunKills: 0, irKills: 0, escaped: 0, maxDetect: 0, detected: false, maskedTime: 0, exposedTime: 0,
     missileHitsTaken: 0, flaresUsed: 0, rescues: 0, route: 'NONE', stormTime: 0, wingmanSeparatedTime: 0, touchdownSink: 0, touchdownKt: 0,
-    hardLanding: false, landed: false, fuelAtEnd: 0, healthAtEnd: 0, wingHealthAtEnd: 0, wingLanded: false, bingo: false, shotsFired: 0, hits: 0, friendlyDamage: 0, assistLanding: false, gatesPassed: 0,
+    hardLanding: false, landed: false, fuelAtEnd: 0, healthAtEnd: 0, wingHealthAtEnd: 0, wingLanded: false, bingo: false, shotsFired: 0, hits: 0, friendlyDamage: 0, assistLanding: false, gatesPassed: 0, wavesCleared: 0, suppliesCollected: 0,
   };
   private step = {
     lineup: false, rotateCall: false, gearCall: false, climbCall: false, wp1: false, wp2: false, contact: false, idCall: false, frontWarn: 0, interf: false, routeMsg: false,
@@ -94,6 +99,44 @@ export class MissionDirector {
       const z = WAYPOINTS.W1.z + (WAYPOINTS.W2.z - WAYPOINTS.W1.z) * (i + 1) / (n + 1), x = cxMain(z);
       this.gates.push({ x, y: terrainHeight(x, z) + 150, z, passed: false });
     }
+  }
+
+  // ----------------------------------------------------------------- arcade wave survival
+  wave = 0;
+  private waveSpawned = 0;
+  private nextWaveAt = -1;
+  get survival() { return this.spec.mode === 'survival'; }
+  /** Survival starts airborne: skip departure and go straight to the fight. */
+  startSurvival() {
+    this.engineStartRequested = true; this.startupProgress = 1;
+    this.setObjectives([{ id: 'wave', text: `Survive wave 1 / ${this.spec.waves!.length}`, state: 'active' }]);
+    this.nav = [];
+    this.enter('P3_INTERCEPT');
+    this.nextWave();
+  }
+  private nextWave() {
+    const waves = this.spec.waves!;
+    this.wave++; const n = waves[this.wave - 1];
+    this.waveSpawned += n; this.nextWaveAt = -1;
+    const o = this.obj('wave'); if (o) { o.text = `Survive wave ${this.wave} / ${waves.length}`; o.state = 'active'; o.detail = `${n} hostiles inbound`; this.host.onObjective?.(o); }
+    this.host.spawnWave?.(n);
+    this.host.sayRole('GC', this.wave === 1 ? `Wave one: ${n} hostiles, weapons free.` : `Wave ${this.wave}: ${n} contacts inbound. Weapons free.`, 2, 'wave');
+    this.lastProgress = this.t;
+  }
+  notifySupply() { this.stats.suppliesCollected++; this.host.sayRole('GC', 'Supply canister collected. Rearmed.', 1, 'supply'); if (this.nextWaveAt > this.t + 3) this.nextWaveAt = this.t + 3; }
+  private updateSurvival() {
+    const h = this.host, waves = this.spec.waves!;
+    if (this.nextWaveAt > 0) { if (this.t >= this.nextWaveAt) this.nextWave(); return; }
+    const spawned = h.drones.slice(0, this.waveSpawned);
+    for (const d of spawned) if (d.alive && !d.removed && (Math.abs(d.pos.x) > WORLD.maxX - 500 || d.pos.z < WORLD.minZ + 800 || d.pos.z > WORLD.maxZ - 500)) { d.removed = true; this.stats.escaped++; }
+    const live = spawned.filter(d => d.alive && !d.removed).length;
+    const o = this.obj('wave'); if (o) { const det = `${live} hostile${live === 1 ? '' : 's'} left`; if (o.detail !== det) { o.detail = det; h.onObjective?.(o); } }
+    if (live > 0) return;
+    this.stats.wavesCleared++;
+    if (this.wave >= waves.length) { if (o) this.setState('wave', 'done', 'All waves cleared'); h.sayRole('GC', 'That was the last wave. Outstanding work.', 2); this.finish(); return; }
+    h.sayRole('GC', `Wave ${this.wave} down. Supply drop marked ahead – fly through it. Next wave in twenty seconds.`, 2, 'wavedown');
+    h.dropSupply?.();
+    this.nextWaveAt = this.t + 20;
   }
 
   // ----------------------------------------------------------------- helpers
@@ -139,7 +182,8 @@ export class MissionDirector {
 
     // ---- global failure conditions ----
     if (pm.crashed) return this.fail(pm.fuel <= 0 && pm.crashCause === 'TERRAIN' ? 'FUEL' : 'CRASH');
-    if (!w.alive) { h.say('wingman_lost'); return this.fail('WINGMAN_LOST'); }
+    if (!w.alive && !this.survival) { h.say('wingman_lost'); return this.fail('WINGMAN_LOST'); }
+    if (this.survival) { this.updateSurvival(); return; }
     // fuel: flameout is not instant failure – the player may still glide to the runway
     const fuelFrac = pm.fuel / p.cfg.fuelCapacity;
     if (fuelFrac < 0.22 && !this.step.bingoCall) { this.step.bingoCall = true; this.stats.bingo = true; h.say('bingo'); }
@@ -334,6 +378,7 @@ export class MissionDirector {
 
   // ----------------------------------------------------------------- radar network
   private updateRadarNetwork(dt: number) {
+    if (!this.spec.radar) { this.masked = true; return; }
     if (this.phase === 'P1_TAKEOFF' || this.phase === 'P6_DEBRIEF' || this.phase === 'FAILED') return;
     this.radarTimer -= dt; if (this.radarTimer > 0) { this.applyDetect(dt); return; }
     this.radarTimer = 0.25;
@@ -392,6 +437,21 @@ export class MissionDirector {
     st.shotsFired = h.player.shotsFired; st.hits = h.player.hits;
     const b: { label: string; points: number }[] = [];
     const add = (label: string, points: number) => { b.push({ label, points: Math.round(points) }); };
+    if (this.survival) {
+      const waves = this.spec.waves!, total = waves.reduce((a, b) => a + b, 0);
+      add(`Hostiles destroyed (${st.kills}/${total})`, st.kills * 500);
+      add(`Waves cleared (${st.wavesCleared}/${waves.length})`, st.wavesCleared * 600);
+      if (st.gunKills) add('Cannon kills', st.gunKills * 100);
+      if (st.suppliesCollected) add('Supply drops collected', st.suppliesCollected * 100);
+      add('Aircraft condition', 500 * st.healthAtEnd);
+      if (st.missileHitsTaken) add('Missile hits taken', -st.missileHitsTaken * 120);
+      const MAXS = total * 500 + waves.length * 600 + 500 + 300;
+      const scoreS = Math.max(0, b.reduce((s, x) => s + x.points, 0));
+      let gradeS: Grade = completed ? 'D' : 'F';
+      if (completed) for (const [th, gg] of GRADES) if (scoreS / MAXS >= th) { gradeS = gg; break; }
+      const kindS: OutcomeKind = completed ? (st.missileHitsTaken === 0 && st.healthAtEnd > 0.9 ? 'FLAWLESS' : 'CLOSE_CALL') : 'FAIL_CRASH';
+      return { completed, failReason, score: scoreS, maxScore: MAXS, grade: gradeS, breakdown: b, stats: { ...st }, kind: kindS, title: completed ? 'All Waves Survived' : `Shot Down on Wave ${this.wave}` };
+    }
     const school = this.id === 'school';
     const MAX = school ? 2400 : 5600 + (h.drones.length - 2) * 500 + this.gates.length * 100 + 150;
     if (completed) add('Mission complete', 1200);

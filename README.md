@@ -85,6 +85,30 @@ In flight a button bar (bottom left) shows the next step and the actions that ma
 - Wingtip **vapor trails** appear when any aircraft pulls more than about 3 g above 600 m.
 - Pilots look into turns and their heads sag under g. Hostile UCAVs have a glowing red sensor eye, canted twin tails and weapon pods so they stand out.
 
+## Glass cockpit HUD (key K: full MFDs / clean HUD)
+
+- **Adaptive contrast:** the HUD samples the brightness of the rendered scene a few times a second. Over snow glare or bright haze it switches to a deeper green with a dark halo; at night it goes back to a soft glow.
+- **TSA MFD (bottom right):** heading-up topographic map built from the terrain heights, ground radar/SAM envelopes, waypoints, supply drops, inbound missiles, contacts with a 20-second vector prediction, and your own predicted 30-second track.
+- **DMS MFD (bottom left):** wireframe of the jet coloured by structural health, G load against its limit, exhaust gas temperature, throttle, fuel, gear, missile hardpoints and gun rounds, weapon/lock state and the fly-by-wire mode.
+- **COMMS MFD (top right):** wingman state, formation and separation, the last radio calls, and a waveform that animates while someone is transmitting. It is driven by the radio line, not by recorded audio. The COVER / ENGAGE / REJOIN / RTB buttons under it are clickable.
+- **Reticles:** lerped flight-path marker with an energy caret, lead-computing gun pipper with a range bar, smoothed target boxes and a +2 s predicted-position marker on the selected target.
+
+## Flight assists
+
+- **Panic recovery (L, RECOVER button, or say "recover"):** rolls wings level the shortest way (inverted included), unloads a stall, then climbs and hands over to the holding autopilot. Automated tests recover an inverted, 25° nose-down Su-57 and F-35 in under 20 s, staying more than 100 m above the terrain.
+- **Fly-by-wire (Settings, on by default):** the stick is trimmed when the angle of attack nears the stall, and auto-GCAS takes the controls when the predicted path hits terrain, then gives them back. It never acts while an autopilot mode or the landing configuration is active.
+- **Action dial (Tab or the ⦿ ACTIONS button):** large buttons for start engine, auto-taxi, auto-takeoff, flares, wingman engage, camera, autoland and recover.
+
+## Theatres and Wave Survival
+
+- Missions now pick a theatre (`src/world/Biomes.ts`): **Arctic Fjord** (Mission 01, Flight School), **Desert Badlands** (Mission 02) and **Neon Megacity – Midnight Canyon** (Mission 03, Wave Survival). A theatre re-colours the same real terrain and changes the sky, light, fog, reflections, vegetation and weather particles. The neon theatre adds solid towers along the canyon floor; flying into one is a crash.
+- The atmosphere uses height fog: thicker in the valleys, thinner with altitude, brighter towards the sun, and dithered so distant ridges don't band.
+- **Arcade: Wave Survival** starts airborne with your wingman. There are four waves of 2, 3, 3 and 4 drones. A supply canister appears after each wave and refills missiles, flares, fuel, gun and some hull. Losing the wingman doesn't end the run.
+
+## Effects
+
+Afterburner bloom sprites, a transonic vapour cone between about Mach 0.93 and 1.04 below 7,500 m, wingtip vapour above about 3 g, and glowing two-layer tracers. The F-35 uses a matte radar-absorbent finish, and the Su-57 uses metallic paint with panel seams.
+
 ## Missions
 
 | Mission | What it adds |
@@ -92,6 +116,7 @@ In flight a button bar (bottom left) shows the next step and the actions that ma
 | 01 Operation Cold Threshold | The original six-phase sortie: valley run, two drones, blizzard, landing. Bonus task: cannon kill. |
 | 02 Operation Iron Veil | Four drones in two waves (the second wave arrives about 30 s after contact), clear skies, no blizzard. |
 | 03 Operation Ember Gate | Four glowing valley gates to fly through (bonus points), three drones, then the blizzard. |
+| Arcade — Wave Survival | Airborne start, four escalating waves, supply drops between waves. |
 | Flight School | Free practice, no hostiles. |
 
 Bonus tasks appear in the objective list. Mission data lives in `src/missions/MissionSpecs.ts`.

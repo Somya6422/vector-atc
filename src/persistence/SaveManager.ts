@@ -102,5 +102,5 @@ export class SaveManager {
     this.save();
   }
   isCompleted(id: string) { return this.data.missions[id]?.completed === true; }
-  availableMissions(): string[] { return this.hasCampaign ? ['m01', 'm02', 'm03', 'school'] : []; }
+  availableMissions(): string[] { return this.hasCampaign ? ['m01', 'm02', 'm03', 'survival', 'school'] : []; }
 }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { FIELD_ELEV, LAKE, WORLD, cxAlt, cxMain, isPaved, terrainHeight } from './Heightfield';
 import { Rng, clamp, lerp, smoothstep } from '../util/math';
+import { BIOMES, type BiomePalette, type BiomeSpec } from './Biomes';
 
 const CHUNK = 2000;
 
@@ -15,24 +16,29 @@ function chunkRes(cx: number, cz: number): number {
   return 11;
 }
 
-const snow = new THREE.Color(0xf2f5fa), rock = new THREE.Color(0x6f6a64), rock2 = new THREE.Color(0x4f4a47);
-const grass = new THREE.Color(0x56603a), grassDry = new THREE.Color(0x7a7447), forest = new THREE.Color(0x2c3d2a), scree = new THREE.Color(0x8b8680);
+const snow = new THREE.Color(), rock = new THREE.Color(), rock2 = new THREE.Color();
+const grass = new THREE.Color(), grassDry = new THREE.Color(), forest = new THREE.Color(), scree = new THREE.Color(), lakeShore = new THREE.Color();
 const tmp = new THREE.Color();
+let pal: BiomePalette = BIOMES.arctic.palette;
+function usePalette(p: BiomePalette) {
+  pal = p; snow.set(p.snow); rock.set(p.rock); rock2.set(p.rock2); grass.set(p.grass); grassDry.set(p.grassDry); forest.set(p.forest); scree.set(p.scree); lakeShore.set(p.lake);
+}
+usePalette(BIOMES.arctic.palette);
 
 function colorAt(h: number, slope: number, x: number, z: number, out: THREE.Color) {
   const n = (Math.sin(x * 0.0021 + z * 0.0013) + Math.sin(x * 0.0067 - z * 0.0049)) * 0.25 + 0.5;
   // lowland
   out.copy(grass).lerp(grassDry, n * 0.7);
-  const forestMask = smoothstep(1250, 900, h) * smoothstep(0.55, 0.3, slope) * smoothstep(0.25, 0.5, n);
+  const forestMask = smoothstep(pal.forestTop, pal.forestTop - 350, h) * smoothstep(0.55, 0.3, slope) * smoothstep(0.25, 0.5, n);
   out.lerp(forest, forestMask * 0.85);
   const rockMask = Math.max(smoothstep(0.35, 0.7, slope), smoothstep(1100, 1900, h));
   tmp.copy(rock).lerp(rock2, n);
   out.lerp(tmp, rockMask);
   out.lerp(scree, smoothstep(0.3, 0.45, slope) * 0.2 * (1 - rockMask));
-  const snowLine = 2150 + (n - 0.5) * 380;
-  const snowMask = smoothstep(snowLine, snowLine + 260, h) * (1 - smoothstep(0.75, 1.05, slope) * 0.75);
+  const snowLine = pal.snowLine + (n - 0.5) * 380;
+  const snowMask = Number.isFinite(snowLine) ? smoothstep(snowLine, snowLine + 260, h) * (1 - smoothstep(0.75, 1.05, slope) * 0.75) : 0;
   out.lerp(snow, snowMask);
-  if (h < LAKE.level + 8 && Math.hypot(x - LAKE.x, z - LAKE.z) < LAKE.radius + 120) out.set(0x4a4a3a);
+  if (h < LAKE.level + 8 && Math.hypot(x - LAKE.x, z - LAKE.z) < LAKE.radius + 120) out.copy(lakeShore);
 }
 
 function buildChunk(cx: number, cz: number, res: number, step: number): THREE.Mesh {
@@ -67,9 +73,10 @@ function buildChunk(cx: number, cz: number, res: number, step: number): THREE.Me
   const edge: number[][] = [[], [], [], []];
   for (let i = 0; i < n; i++) { edge[0].push(i); edge[1].push((n - 1) * n + i); edge[2].push(i * n); edge[3].push(i * n + n - 1); }
   const skirtStart: number[] = [];
+  const skirtSrc: number[] = [];
   for (const e of edge) {
     skirtStart.push(k);
-    for (const v of e) { pos[k * 3] = pos[v * 3]; pos[k * 3 + 1] = pos[v * 3 + 1] - skirt; pos[k * 3 + 2] = pos[v * 3 + 2]; nor[k * 3] = nor[v * 3]; nor[k * 3 + 1] = nor[v * 3 + 1]; nor[k * 3 + 2] = nor[v * 3 + 2]; col[k * 3] = col[v * 3]; col[k * 3 + 1] = col[v * 3 + 1]; col[k * 3 + 2] = col[v * 3 + 2]; k++; }
+    for (const v of e) { skirtSrc.push(v); pos[k * 3] = pos[v * 3]; pos[k * 3 + 1] = pos[v * 3 + 1] - skirt; pos[k * 3 + 2] = pos[v * 3 + 2]; nor[k * 3] = nor[v * 3]; nor[k * 3 + 1] = nor[v * 3 + 1]; nor[k * 3 + 2] = nor[v * 3 + 2]; col[k * 3] = col[v * 3]; col[k * 3 + 1] = col[v * 3 + 1]; col[k * 3 + 2] = col[v * 3 + 2]; k++; }
   }
   const idx: number[] = [];
   for (let j = 0; j < res; j++) for (let i = 0; i < res; i++) {
@@ -89,6 +96,7 @@ function buildChunk(cx: number, cz: number, res: number, step: number): THREE.Me
   geo.setIndex(idx);
   geo.computeBoundingSphere();
   const mesh = new THREE.Mesh(geo, terrainMaterial);
+  mesh.userData.terrain = { top: n * n, skirtSrc: Int32Array.from(skirtSrc) };
   mesh.receiveShadow = true;
   mesh.matrixAutoUpdate = false;
   return mesh;
@@ -175,11 +183,31 @@ export class Terrain {
     this.group.add(buildTrees());
     // lake surface
     const lake = new THREE.Mesh(new THREE.CircleGeometry(LAKE.radius + 80, 40), new THREE.MeshStandardMaterial({ color: 0x1d3a52, roughness: 0.08, metalness: 0.6 }));
-    lake.rotation.x = -Math.PI / 2; lake.position.set(LAKE.x, LAKE.level - 1.0, LAKE.z);
+    lake.userData.lake = true; lake.rotation.x = -Math.PI / 2; lake.position.set(LAKE.x, LAKE.level - 1.0, LAKE.z);
     this.group.add(lake);
     this.ready = true; onProgress?.(1);
   }
   get isReady() { return this.ready; }
+  private biome = 'arctic';
+  /** Re-skins the existing terrain for a theatre (vertex colours, vegetation, lake) without regenerating geometry. */
+  applyBiome(b: BiomeSpec) {
+    if (!this.ready || b.id === this.biome) return;
+    this.biome = b.id; usePalette(b.palette);
+    const c = new THREE.Color();
+    for (const o of this.group.children) {
+      const info = o.userData.terrain as { top: number; skirtSrc: Int32Array } | undefined;
+      if (info) {
+        const g = (o as THREE.Mesh).geometry, p = g.getAttribute('position'), nr = g.getAttribute('normal'), col = g.getAttribute('color') as THREE.BufferAttribute;
+        for (let i = 0; i < info.top; i++) {
+          const x = p.getX(i), z = p.getZ(i), h = p.getY(i) + (isPaved(x, z) ? 0.6 : 0);
+          colorAt(h, 1 - nr.getY(i), x, z, c); col.setXYZ(i, c.r, c.g, c.b);
+        }
+        for (let k = 0; k < info.skirtSrc.length; k++) { const s = info.skirtSrc[k]; col.setXYZ(info.top + k, col.getX(s), col.getY(s), col.getZ(s)); }
+        col.needsUpdate = true;
+      } else if ((o as THREE.InstancedMesh).isInstancedMesh) o.visible = b.trees;
+      else if (o.userData.lake) ((o as THREE.Mesh).material as THREE.MeshStandardMaterial).color.set(b.id === 'desert' ? 0x6a5536 : b.id === 'neon' ? 0x0a1426 : 0x1d3a52);
+    }
+  }
   dispose() {
     this.cancelled = true;
     this.group.traverse(o => { const m = o as THREE.Mesh; if (m.geometry) m.geometry.dispose(); });

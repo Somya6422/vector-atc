@@ -120,6 +120,6 @@ export class DialogueSystem {
   }
   pause() { this.paused = true; this.speech?.pause?.(); }
   resume() { this.paused = false; this.speech?.resume?.(); }
-  clear() { this.queue.length = 0; this.current = null; this.speech?.cancel(); this.onSubtitle?.(null); this.lastKey.clear(); }
+  clear() { this.history.length = 0; this.queue.length = 0; this.current = null; this.speech?.cancel(); this.onSubtitle?.(null); this.lastKey.clear(); }
   get busy() { return !!this.current || this.queue.length > 0; }
 }

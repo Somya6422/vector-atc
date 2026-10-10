@@ -11,7 +11,8 @@ export type Cmd =
   | { t: 'heading'; deg: number } | { t: 'pitch'; deg: number }
   | { t: 'goto_nav' } | { t: 'goto_home' } | { t: 'autoland' } | { t: 'autotakeoff' } | { t: 'taxi' } | { t: 'stop' }
   | { t: 'weapon'; w: 'GUN' | 'IR' | 'RADAR' } | { t: 'target' } | { t: 'fire'; w?: 'GUN' | 'IR' | 'RADAR' } | { t: 'cease' }
-  | { t: 'wing'; cmd: 'cover' | 'engage' | 'rejoin' | 'formation'; f?: 'ECHELON_RIGHT' | 'LINE_ABREAST' | 'TRAIL' } | { t: 'wing_report' }
+  | { t: 'recover' }
+  | { t: 'wing'; cmd: 'cover' | 'engage' | 'rejoin' | 'formation' | 'rtb'; f?: 'ECHELON_RIGHT' | 'LINE_ABREAST' | 'TRAIL' } | { t: 'wing_report' }
   | { t: 'report'; what: 'status' | 'fuel' | 'altitude' | 'speed' | 'heading' | 'enemies' | 'airfield' }
   | { t: 'camera'; view?: 'chase' | 'cockpit' | 'wing' | 'tail' | 'orbit' | 'front' | 'target' | 'tactical' | 'tower' | 'cinematic' | 'flyby'; next?: boolean } | { t: 'mouse'; on?: boolean } | { t: 'radar_range'; km: number }
   | { t: 'pause' } | { t: 'resume' } | { t: 'map' } | { t: 'objectives' } | { t: 'hint' } | { t: 'start_engines' } | { t: 'restart' } | { t: 'hangar' } | { t: 'menu' }
@@ -94,6 +95,7 @@ function parseClause(s: string, raw: string): Cmd[] {
   if (has(/\b(status|report|systems check|how are we)\b/)) return [{ t: 'report', what: 'status' }];
 
   // ---- wingman commands ----
+  if (has(/\b(wingman|wing man|specter (one|two|1|2))\b/) && has(/\b(rtb|return to base|go home|head home|bug out|go back)\b/)) return [{ t: 'wing', cmd: 'rtb' }];
   if (has(/\b(cover me|defensive|protect me|defend me|watch my (six|back)|stay close)\b/)) return [{ t: 'wing', cmd: 'cover' }];
   if (has(/\b(rejoin|re join|form up|on my wing|regroup|join (up )?(on )?me)\b/)) return [{ t: 'wing', cmd: 'rejoin' }];
   if ((m = s.match(/\b(echelon|line abreast|abreast|trail)\b/)) && has(/formation|form|go|switch|change|fly|\bbe\b/)) return [{ t: 'wing', cmd: 'formation', f: m[1] === 'echelon' ? 'ECHELON_RIGHT' : m[1] === 'trail' ? 'TRAIL' : 'LINE_ABREAST' }];
@@ -114,6 +116,7 @@ function parseClause(s: string, raw: string): Cmd[] {
   if (has(/\b(take me|fly me|go|head|return|rtb|bring me)\b.*\b(home|back to base|the airfield|base)\b|\b(rtb|return to base)\b/)) return [{ t: 'goto_home' }];
   if (has(/\b(fly|go|head|navigate|proceed)( to| toward| towards)?( the)?( next)?( waypoint| nav point| nav| objective)\b|\bnext waypoint\b/)) return [{ t: 'goto_nav' }];
   if (has(/\b(autopilot|auto pilot)\b.*\b(off|disengage|cancel)\b|\b(disengage|cancel|kill) (the )?(autopilot|auto pilot|assist)\b|\bmanual( control)?\b|\bi have (control|the aircraft)\b|\bstand down autopilot\b/)) return [{ t: 'ap_off' }];
+  if (has(/\b(recover|auto ?recover(y)?|panic|save me|spin recovery|i ?a?m lost|i ?a?m spinning|unusual attitude)\b/)) return [{ t: 'recover' }];
   if (has(/\b(level (the )?wings|wings level|level (out|off)|straight and level|fly level)\b/)) return [{ t: 'level' }];
   if (has(/\b(hold|maintain|keep)( this| the| current)? (altitude|height)\b/)) return [{ t: 'hold_alt' }];
   if (has(/\b(hold|maintain|keep)( this| the| current)? (heading|course)\b/)) return [{ t: 'hold_hdg' }];
