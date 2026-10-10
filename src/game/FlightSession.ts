@@ -11,7 +11,7 @@ import type { WeaponId } from '../combat/WeaponSpecs';
 import { BanditAI } from '../ai/BanditAI';
 import { WingmanAI, type WingmanCall } from '../ai/WingmanAI';
 import { MissionDirector, type MissionHost, type MissionId, type MissionResult, type Phase } from '../missions/MissionDirector';
-import { FIELD_ELEV, START_POS, WAYPOINTS, blizzardAt, cxMain, minClearanceAlong, resetBlizzard, terrainHeight, world } from '../world/Heightfield';
+import { FIELD_ELEV, RUNWAY, START_POS, WAYPOINTS, blizzardAt, cxMain, minClearanceAlong, resetBlizzard, terrainHeight, world } from '../world/Heightfield';
 import { approachInfo, chooseRunwayDirection } from '../world/Landing';
 import { HUD, type CameraView, type HudWarnings } from '../avionics/HUD';
 import { CameraRig, VIEW_LABEL } from './CameraRig';
@@ -25,6 +25,7 @@ import { DialogueSystem } from '../story/DialogueSystem';
 import { SCRIPT, resolveRole, type Role } from '../story/Script';
 import type { Route } from '../persistence/SaveManager';
 import type { Settings } from '../ui/Settings';
+import type { GuideButton } from '../ui/PilotBar';
 import { DEG, KT, clamp } from '../util/math';
 
 const _a = new THREE.Vector3(), _b = new THREE.Vector3();
@@ -310,6 +311,7 @@ export class FlightSession {
     // voice assists (autopilot / taxi / take-off / landing): any manual stick input hands control straight back
     const manual = inp.held('pitchUp') || inp.held('pitchDown') || inp.held('rollLeft') || inp.held('rollRight') || inp.held('yawLeft') || inp.held('yawRight') || (!!this.mouseNorm && Math.hypot(this.mouseNorm.x, this.mouseNorm.y) > 0.3);
     this.assists.update(dt, this.elapsed, this.assists.auto === 'taxi' ? false : manual, inp.held('throttleUp') || inp.held('throttleDown'));
+    if (inp.wasPressed('autopilot')) this.flash(this.assists.active ? this.voiceExec({ t: 'ap_off' }) : this.voiceExec({ t: 'level' }), 2);
     if (inp.wasPressed('mouseFlight')) { this.o.settings.set('mouseFlight', !st.mouseFlight); this.flash(this.o.settings.data.mouseFlight ? 'MOUSE-AIM ON – the nose follows the cursor' : 'MOUSE-AIM OFF – keyboard flight', 1.8); }
     if (inp.wasPressed('pause')) { this.o.onPause('pause'); return; }
     if (inp.wasPressed('map')) { this.o.onPause('map'); return; }
@@ -584,6 +586,43 @@ export class FlightSession {
       assist: this.assists.describe(),
       mouse: this.mouseNorm && cam.view !== 'flyby' ? { x: window.innerWidth / 2 + this.mouseNorm.x * Math.min(window.innerWidth, window.innerHeight) * 0.38, y: window.innerHeight / 2 + this.mouseNorm.y * Math.min(window.innerWidth, window.innerHeight) * 0.38, r: Math.min(window.innerWidth, window.innerHeight) * 0.38 * 0.06 } : null,
     });
+  }
+
+  /** Plain-language next step + clickable actions for the on-screen pilot bar. */
+  guide(): { step: string | null; buttons: GuideButton[] } {
+    const d = this.director, m = this.player.model, A = this.assists, fc = this.fc;
+    const btns: GuideButton[] = [];
+    let step: string | null = null;
+    const onRwy = Math.abs(m.pos.x) < RUNWAY.halfWid + 10 && Math.abs(m.pos.z) < RUNWAY.halfLen && (m.heading < 25 || m.heading > 335);
+    if (m.crashed) return { step: null, buttons: [] };
+    if (A.auto !== 'none') {
+      step = A.auto === 'taxi' ? 'Taxiing to the runway automatically…' : A.auto === 'takeoff' ? 'Taking off automatically…' : 'Autoland in progress – the jet will land itself.';
+      btns.push({ label: 'CANCEL – I FLY', title: 'Take back control', cmd: { t: 'ap_off' }, hot: true });
+    } else if (m.onGround && !d.engineStartRequested) {
+      step = 'Step 1: start the engines.';
+      btns.push({ label: 'START ENGINES', title: 'Same as pressing F', cmd: { t: 'start_engines' }, hot: true });
+    } else if (m.onGround && !m.engineOn) {
+      step = 'Engines spooling up… wait a few seconds.';
+    } else if (m.onGround && m.vel.length() < 3 && !onRwy) {
+      step = 'Step 2: drive to the runway. Click AUTO-TAXI, or steer with A/D and Ctrl+W.';
+      btns.push({ label: 'AUTO-TAXI', title: 'Taxi to runway 36 automatically', cmd: { t: 'taxi' }, hot: true });
+    } else if (m.onGround && onRwy && m.vel.length() < 25) {
+      step = 'Step 3: take off. Click AUTO-TAKEOFF, or hold Ctrl+W (full power) and pull back with W at about 135 kt.';
+      btns.push({ label: 'AUTO-TAKEOFF', title: 'Automatic take-off and climb', cmd: { t: 'autotakeoff' }, hot: true });
+    } else if (!m.onGround && m.gearPos > 0.5 && m.pos.y - FIELD_ELEV > 120) {
+      step = 'You are flying! Raise the landing gear (G).';
+    }
+    if (!m.onGround && A.auto === 'none') {
+      btns.push({ label: A.apActive ? 'AUTOPILOT: ON' : 'AUTOPILOT', title: A.apActive ? 'Turn the autopilot off (or touch any flight key)' : 'Hold current heading and altitude (P)', cmd: A.apActive ? { t: 'ap_off' } : { t: 'level' }, on: A.apActive });
+      if (d.nav[0]) btns.push({ label: 'NEXT WAYPOINT', title: 'Autopilot flies to the next waypoint', cmd: { t: 'goto_nav' } });
+      btns.push({ label: fc.gearDown ? 'GEAR UP' : 'GEAR DOWN', title: 'Landing gear (G)', cmd: { t: 'gear', down: !fc.gearDown } });
+      btns.push({ label: 'AUTOLAND', title: 'Land automatically (costs 300 score points)', cmd: { t: 'autoland' } });
+    }
+    if (m.onGround && m.engineOn && A.auto === 'none') btns.push({ label: 'BRAKES', title: 'Toggle wheel brakes', cmd: { t: 'brake', on: !fc.brakeLatch }, on: fc.brakeLatch });
+    btns.push({ label: 'CAMERA', title: 'Change camera angle (5)', cmd: { t: 'camera', next: true } });
+    btns.push({ label: 'HINT', title: 'Ground Control hint (H)', cmd: { t: 'hint' } });
+    btns.push({ label: '? GUIDE', title: 'Quick-start guide (I)', cmd: { t: 'guide' } });
+    return { step, buttons: btns };
   }
 
   private contextPrompt(): string | null {

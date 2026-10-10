@@ -75,6 +75,10 @@ This project was built for the Wispr Flow shortlisting task (hhgoa-2026), which 
 
 Note: Wispr Flow has no public API, and the in-game voice commands have not been tested with a real Wispr Flow session. They were tested with scripts.
 
+## Easy mode: on-screen buttons and quick-start guide
+
+In flight a button bar (bottom left) shows the next step and the actions that make sense right now: START ENGINES, AUTO-TAXI, AUTO-TAKEOFF, AUTOPILOT (also key **P**), NEXT WAYPOINT, GEAR, AUTOLAND, CAMERA, HINT. A quick-start guide opens automatically on the first flight; reopen it with **I** or the ? GUIDE button. Buttons run the same commands as typed or spoken ones.
+
 ## Controls
 
 | Action | Input | Notes |

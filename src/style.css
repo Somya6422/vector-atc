@@ -104,3 +104,16 @@ body[data-state="DEBRIEFING"] #subtitle, body[data-state="MISSION_FAILED"] #subt
 #voice .vheard { color: var(--c); } #voice .vfb { color: var(--g); } #voice .vfb.bad { color: var(--a); }
 #voice .vhint { text-align: center; font-size: 11px; opacity: .55; margin-top: 3px; }
 #voice .vlog > div { background: rgba(0,0,0,.45); padding: 1px 8px; }
+#pilotbar { position: absolute; left: 12px; bottom: 74px; z-index: 9; font-family: Consolas, "Courier New", monospace; max-width: min(560px, 46vw); }
+#pilotbar .pbstep { background: rgba(6,16,22,.78); border: 1px solid var(--line); border-left: 3px solid var(--a); border-radius: 6px; padding: 7px 10px; margin-bottom: 6px; color: #e8f4ff; font-size: 13px; line-height: 1.35; }
+#pilotbar .pbrow { display: flex; flex-wrap: wrap; gap: 6px; }
+#pilotbar .pbbtn { background: rgba(6,16,22,.8); color: #cfe8e0; border: 1px solid var(--line); border-radius: 5px; padding: 6px 10px; font: inherit; font-size: 12px; letter-spacing: .04em; cursor: pointer; }
+#pilotbar .pbbtn:hover { border-color: var(--a); color: #fff; }
+#pilotbar .pbbtn.hot { border-color: var(--a); color: var(--a); box-shadow: 0 0 10px rgba(255,195,77,.3); }
+#pilotbar .pbbtn.on { background: rgba(255,195,77,.22); color: #fff; border-color: var(--a); }
+#quickguide { position: absolute; inset: 0; z-index: 30; background: rgba(0,6,10,.72); align-items: center; justify-content: center; }
+#quickguide .qgcard { background: rgba(8,20,28,.96); border: 1px solid var(--a); border-radius: 10px; padding: 22px 26px; max-width: 560px; color: #e8f4ff; font-family: Consolas, "Courier New", monospace; font-size: 14px; line-height: 1.5; }
+#quickguide h2 { margin: 0 0 10px; color: var(--a); font-size: 18px; }
+#quickguide ol { padding-left: 20px; margin: 0 0 10px; }
+#quickguide li { margin-bottom: 6px; }
+#quickguide .qgclose { background: var(--a); color: #101820; border: 0; border-radius: 5px; padding: 8px 18px; font: inherit; font-weight: bold; cursor: pointer; }

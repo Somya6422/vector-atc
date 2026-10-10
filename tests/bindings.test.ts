@@ -7,12 +7,12 @@ describe('key bindings', () => {
   it('defaults are unique', () => { expect(new Set(ACTIONS.map(a => a.def)).size).toBe(ACTIONS.length); });
   it('rebinding swaps on conflict, persists, and resets', () => {
     const st = new Mem(), b = new Bindings(); b.attach(st);
-    expect(b.set('flares', 'KeyP')).toBeNull();
-    expect(b.code('flares')).toBe('KeyP');
-    expect(b.set('gear', 'KeyP')).toBe('flares');           // KeyP was flares -> swap
-    expect(b.code('gear')).toBe('KeyP'); expect(b.code('flares')).toBe('KeyG');
+    expect(b.set('flares', 'KeyJ')).toBeNull();
+    expect(b.code('flares')).toBe('KeyJ');
+    expect(b.set('gear', 'KeyJ')).toBe('flares');           // KeyJ was flares -> swap
+    expect(b.code('gear')).toBe('KeyJ'); expect(b.code('flares')).toBe('KeyG');
     const b2 = new Bindings(); b2.attach(st);
-    expect(b2.code('gear')).toBe('KeyP');
+    expect(b2.code('gear')).toBe('KeyJ');
     b2.resetAll(); expect(b2.code('gear')).toBe('KeyG');
   });
   it('corrupt or duplicate stored data falls back safely', () => {

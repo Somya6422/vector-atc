@@ -5,6 +5,7 @@ import { CameraRig } from './CameraRig';
 import { Input } from './Input';
 import { loadModels } from '../flight/ModelCache';
 import { VoiceController } from '../voice/VoiceController';
+import { PilotBar } from '../ui/PilotBar';
 import type { Cmd } from '../voice/CommandParser';
 import { loadDem } from '../world/Dem';
 import { ACTIONS, bindings } from './Bindings';
@@ -42,6 +43,7 @@ export class Game {
   readonly hud: HUD;
   readonly map = new MapView();
   voice!: VoiceController;
+  pilotBar!: PilotBar;
   session: FlightSession | null = null;
   hangar: HangarScene | null = null;
   route: Route = 'A_BOY_SU57';
@@ -85,6 +87,17 @@ export class Game {
       resetInput: () => this.input.reset(),
       click: () => this.audio.uiClick(),
     });
+    this.pilotBar = new PilotBar(host);
+    this.pilotBar.onCommand = c => {
+      if (!this.session || this.session.paused || !this.fsm.inFlight) return;
+      this.audio.uiClick();
+      this.voice.say(this.session.voiceExec(c));
+    };
+    window.setInterval(() => {
+      const on = !!this.session && this.fsm.inFlight && !this.session.paused;
+      this.pilotBar.setVisible(on || (this.pilotBar.guideOpen && !!this.session));
+      if (on) { const g = this.session!.guide(); this.pilotBar.update(g.step, g.buttons); }
+    }, 250);
     this.ui.onSetting = (k, v) => { this.settings.set(k, v); this.applySettings(); };
     this.settings.onChange(() => this.applySettings());
     this.input.onKeyDown = (code) => this.onKey(code);
@@ -149,6 +162,7 @@ export class Game {
     if (this.rebinding) return false;
     if (this.voice?.focused) return false;
     if (code === bindings.code('voice') && (this.fsm.inFlight || st === 'HANGAR' || st === 'PAUSED' || !(document.activeElement instanceof HTMLButtonElement))) { this.voice.focus(); return true; }
+    if (code === bindings.code('guide') && this.session && (this.fsm.inFlight || st === 'PAUSED')) { this.pilotBar.toggleGuide(); return true; }
     if (code === bindings.code('voiceMic')) { this.voice.toggleMic(); return true; }
     if (code === 'Escape' || code === bindings.code('pause')) {
       if (st === 'PAUSED') { this.pauseBack(); return true; }
@@ -218,7 +232,7 @@ export class Game {
         break;
       case 'LOADING': ui.clear(); ui.setLoading(0.3, 'Preparing aircraft…'); break;
       case 'TAKEOFF':
-        this.sm.setActive('flight'); this.hud.setVisible(true); this.setShowcase(null); ui.clear(); ui.setLoading(null); break;
+        this.sm.setActive('flight'); this.hud.setVisible(true); this.setShowcase(null); ui.clear(); ui.setLoading(null); if (from !== 'PAUSED' && !this.pilotBar.seenBefore()) this.pilotBar.showGuide(true); break;
       case 'ACTIVE_MISSION': break;
       case 'PAUSED': this.session?.pause(); this.audio.pauseAll(); this.audio.setPurr(false); break;
       case 'DEBRIEFING': break;
