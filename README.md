@@ -64,6 +64,17 @@ Everything you can do with keyboard and mouse can also be done by voice or typed
 
 Voice commands that fly the aircraft (heading/altitude/speed hold, taxi, take-off, autoland) are real control laws on the same flight model; any manual stick input hands control straight back, and the autopilot has automatic terrain-collision recovery.
 
+## Built with Wispr Flow (hhgoa-2026 task)
+
+This project was built for the Wispr Flow shortlisting task (hhgoa-2026), which asks participants to build a project using Wispr Flow and their voice.
+
+- **Building:** the game was developed by directing an AI coding assistant (Claude Code), with requests dictated through Wispr Flow. The recorded video shows this process.
+- **Playing:** the game also takes voice commands. Dictate into the in-game command line (press Enter), and Wispr Flow types the text and the game parses it. See *Voice control* above.
+- **Account:** Wispr Flow account created through https://ref.wisprflow.ai/hhg.
+- **Demo:** the recording script is in [DEMO_SCRIPT.md](DEMO_SCRIPT.md).
+
+Note: Wispr Flow has no public API, and the in-game voice commands have not been tested with a real Wispr Flow session. They were tested with scripts.
+
 ## Controls
 
 | Action | Input | Notes |
