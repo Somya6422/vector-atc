@@ -4,6 +4,7 @@ import { SceneManager } from './SceneManager';
 import { CameraRig } from './CameraRig';
 import { Input } from './Input';
 import { loadModels } from '../flight/ModelCache';
+import { loadPilotModels } from '../characters/PilotModels';
 import { VoiceController } from '../voice/VoiceController';
 import { PilotBar } from '../ui/PilotBar';
 import type { Cmd } from '../voice/CommandParser';
@@ -121,7 +122,7 @@ export class Game {
       this.ui.setLoading(1, 'Terrain generation failed – continuing with a reduced world.');
     }
     this.ui.setLoading(0.92, 'Loading aircraft and pilot models…');
-    await loadModels(f => this.ui.setLoading(0.92 + f * 0.08));
+    await Promise.all([loadModels(f => this.ui.setLoading(0.92 + f * 0.08)), loadPilotModels()]);
     for (const r of ['A_BOY_SU57', 'B_GIRL_F35'] as Route[]) {
       const v = buildAircraft(r === 'A_BOY_SU57' ? 'SU57' : 'F35', { girlPilot: r === 'B_GIRL_F35' });
       v.group.position.copy(SHOWCASE); v.group.position.y += 2.4; v.group.rotation.y = 0.5; v.cockpit.visible = false; v.group.visible = false;

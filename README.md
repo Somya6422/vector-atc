@@ -100,6 +100,16 @@ Bonus tasks appear in the objective list. Mission data lives in `src/missions/Mi
 
 Chase, cockpit, wing, tail (low rear), orbit, front, target (lock-on, frames the selected contact), tactical (overhead), tower (fixed near the airfield), cinematic (slow orbiting drone shot) and flyby. Voice: "tactical view", "tail camera", "cinematic view", "next camera".
 
+## Pilot characters
+
+The hangar pilots are the two textured Meshy characters you supplied as .blend files: the bearded pilot is Specter-1 (boy) and the blonde pilot is Specter-2 (girl). `tools/blend_export.py` converts a .blend with Blender (joins meshes, decimates to about 20k triangles, shrinks textures to 1024 px, exports .glb and renders a preview):
+
+```
+blender -b model.blend --python tools/blend_export.py -- out.glb preview.png 20000
+```
+
+The results live in `public/models/pilot_boy.glb` and `pilot_girl.glb`. The models are not rigged, so they keep their A-pose and move only by sway and bob. They wear the textured olive flight suits from the source files, which replaces the orange and teal colour coding in the hangar; the in-cockpit helmets keep orange and teal.
+
 ## Mouse-aim (key N)
 
 Mouse-aim now flies the nose onto a world-fixed aim point. Move the mouse and the amber aim cursor moves; the jet banks and pulls until its nose cross sits on the cursor. Click once in the game and the pointer is captured, so it never runs into the screen edge; Esc releases it and pauses. Pressing any flight key snaps the aim point back to the nose. The aim point cannot swing more than 100 degrees from the nose. In a scripted test the nose settled within 1 degree of the aim point about 5 s after a 60 degree move.

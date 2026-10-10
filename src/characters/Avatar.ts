@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getModel } from '../flight/ModelCache';
+import { getPilotModel } from './PilotModels';
 
 export type Gesture = 'idle' | 'arms_crossed' | 'hand_on_hip' | 'crouch';
 
@@ -32,7 +33,14 @@ export class Avatar {
     const suit = new THREE.MeshStandardMaterial({ color: suitColor, roughness: 0.8 });
     const dark = new THREE.MeshStandardMaterial({ color: 0x1e2226, roughness: 0.9 });
     const pm = getModel('pilot');
-    if (pm) {
+    const real = getPilotModel(girl ? 'girl' : 'boy');
+    if (real) {
+      // textured character from the supplied .blend (already standing on y = 0, facing -Z, arms relaxed)
+      this.torso = new THREE.Mesh(real.geometry, real.material); this.torso.castShadow = true; this.torso.receiveShadow = true; this.group.add(this.torso);
+      this.armL = new THREE.Group(); this.armR = new THREE.Group(); this.legL = new THREE.Group(); this.legR = new THREE.Group();
+      this.head = new THREE.Group(); this.head.position.y = real.height - 0.12; this.group.add(this.head);
+      this.modelMode = true;
+    } else if (pm) {
       // user-supplied pilot sculpt (base removed, feet at y=0, facing -Z). Limbs are baked into the mesh, so motion is body sway/lean/bob.
       const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.78, metalness: 0.05 });
       this.torso = new THREE.Mesh(Avatar.colourise(pm, suitColor, girl), mat); this.torso.castShadow = true; this.torso.rotation.y = Math.PI; this.group.add(this.torso);   // sculpt faces +Z natively; avatars face -Z
