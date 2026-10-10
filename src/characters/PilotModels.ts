@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 /**
  * Textured pilot characters (Meshy .blend files supplied by the project owner, converted with tools/blend_export.py
  * into public/models/pilot_boy.glb and pilot_girl.glb). Each is baked into one mesh that stands on y = 0, faces -Z and
- * has real-world height (A-pose kept as supplied – the models are not rigged). Missing files fall back to the older sculpt.
+ * has real-world height. tools/pose_pilot.py relaxed the A-pose arms to the sides in Blender. Missing files fall back to the older sculpt.
  */
 export interface PilotModel { geometry: THREE.BufferGeometry; material: THREE.Material; height: number }
 const cache = new Map<'boy' | 'girl', PilotModel>();
@@ -25,7 +25,7 @@ async function loadOne(who: 'boy' | 'girl', loader: GLTFLoader) {
   const bb = g.boundingBox!, h = HEIGHT[who], k = h / (bb.max.y - bb.min.y);
   g.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2); g.scale(k, k, k);
   if (!g.getAttribute('normal')) g.computeVertexNormals();
-  // the source models stand in an A-pose; they are not rigged, so the pose is kept as supplied
+  // the arms were relaxed to the sides offline (tools/pose_pilot.py); the mesh is static
   g.computeBoundingBox(); g.computeBoundingSphere();
   g.userData.shared = true;
   const mat = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.MeshStandardMaterial;

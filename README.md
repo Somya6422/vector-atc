@@ -85,6 +85,26 @@ In flight a button bar (bottom left) shows the next step and the actions that ma
 - Wingtip **vapor trails** appear when any aircraft pulls more than about 3 g above 600 m.
 - Pilots look into turns and their heads sag under g. Hostile UCAVs have a glowing red sensor eye, canted twin tails and weapon pods so they stand out.
 
+## Aircraft skills (press / for the full commands sheet)
+
+| Jet | Skill | Key | Voice |
+|---|---|---|---|
+| Su-57 | Pugachev's Cobra: thrust-vectoring post-stall manoeuvre (200–470 kt, wings level) | U | "cobra" |
+| Su-57 | Kulbit: 360° somersault (220–480 kt) | O | "kulbit" |
+| Su-57 | Supercruise: about Mach 1.3 at military power (lower transonic drag) | – | – |
+| F-35 | STOVL: hover, vertical take-off and landing, hover-taxi (convert below 300 kt) | J | "hover", "vertical take-off", "forward flight" |
+| F-35 | Sensor fusion + DAS: +20 % radar range, 2× faster identification, 360° missile display | – | – |
+| Both | Electronic jammer: 8 s, radar missiles may lose lock | 6 | "jammer on" |
+| Both | Internal weapons bays: doors open briefly at each launch | – | – |
+
+## Flight feel (keyboard)
+
+A tap of A/D gives a small, precise bank. Holding it banks to about 70° and stops there; hold past 1.2 s for a full roll. When you let go, the bank holds. Small banks settle back to wings level. In a banked turn with no pitch input, fly-by-wire pulls just enough to keep the turn nearly level. Before this fix, a 0.8 s tap rolled the jet to 148° (almost inverted).
+
+## Commands sheet
+
+Press **/** (or the ⌨ KEYS button, or "Commands & Shortcuts" in the main or pause menu) for every key, generated from your current bindings, plus all aircraft skills and example voice commands.
+
 ## Glass cockpit HUD (key K: full MFDs / clean HUD)
 
 - **Adaptive contrast:** the HUD samples the brightness of the rendered scene a few times a second. Over snow glare or bright haze it switches to a deeper green with a dark halo; at night it goes back to a soft glow.
@@ -133,7 +153,7 @@ The hangar pilots are the two textured Meshy characters you supplied as .blend f
 blender -b model.blend --python tools/blend_export.py -- out.glb preview.png 20000
 ```
 
-The results live in `public/models/pilot_boy.glb` and `pilot_girl.glb`. The models are not rigged, so they keep their A-pose and move only by sway and bob. They wear the textured olive flight suits from the source files, which replaces the orange and teal colour coding in the hangar; the in-cockpit helmets keep orange and teal.
+The results live in `public/models/pilot_boy.glb` and `pilot_girl.glb`. `tools/pose_pilot.py` relaxes their A-pose arms to the sides in Blender. The meshes are static, so they move only by sway and bob. They wear the textured olive flight suits from the source files, which replaces the orange and teal colour coding in the hangar; the in-cockpit helmets keep orange and teal.
 
 ## Mouse-aim (key N)
 

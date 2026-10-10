@@ -110,6 +110,12 @@ export interface AircraftVisual {
   glows: THREE.Sprite[];
   /** transonic vapour cone (shown near Mach 1) */
   vaporCone: THREE.Mesh;
+  /** internal weapons-bay doors (hinged groups, rotate on launch) */
+  bayDoors: THREE.Group[];
+  /** afterburner shock diamonds (Mach disks) along each exhaust */
+  diamonds: THREE.Sprite[];
+  /** STOVL lift-fan / swivel-nozzle plumes (F-35) */
+  liftPlumes: THREE.Sprite[];
   navLights: THREE.Mesh[];
   cockpit: THREE.Group;       // interior – shown only in cockpit view
   exterior: THREE.Group;      // everything else
@@ -293,7 +299,7 @@ export function buildAircraft(id: AircraftId, opts: { girlPilot?: boolean } = {}
       const body = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 2.6, 8), new THREE.MeshStandardMaterial({ color: 0xdfe3e6, roughness: 0.4 })); body.rotation.x = Math.PI / 2; body.position.y = -0.18; grp.add(body);
       const nose = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.5, 8), new THREE.MeshStandardMaterial({ color: 0xb02820, roughness: 0.5 })); nose.rotation.x = -Math.PI / 2; nose.position.set(0, -0.18, -1.55); grp.add(nose);
       for (let i = 0; i < 4; i++) { const fin = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.28, 0.4), MAT.dark()); fin.position.set(0, -0.18, 1.1); fin.rotation.z = i * Math.PI / 2; grp.add(fin); }
-      exterior.add(grp); stores.push(grp);
+      grp.visible = false; exterior.add(grp); stores.push(grp);   // carried internally (stealth): only seen as the bay opens
     }
   }
   for (const sx of [-1, 1]) { const s = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffffff })); s.position.set(sx * (id === 'DRONE' ? 0.8 : 1.9), id === 'DRONE' ? 1.6 : 2.9, cfgD.length * 0.36); exterior.add(s); strobes.push(s); }
@@ -302,6 +308,25 @@ export function buildAircraft(id: AircraftId, opts: { girlPilot?: boolean } = {}
   for (const f of afterburners) {
     const gs = new THREE.Sprite(glowMat.clone()); const h = (f.geometry as THREE.ConeGeometry).parameters.height;
     gs.position.set(f.position.x, f.position.y, f.position.z - h * 0.45); gs.scale.setScalar(2); exterior.add(gs); glows.push(gs);
+  }
+  const diamonds: THREE.Sprite[] = [];
+  for (const f of afterburners) {
+    const h = (f.geometry as THREE.ConeGeometry).parameters.height;
+    for (let i = 0; i < 4; i++) {
+      const d = new THREE.Sprite(glowMat.clone()); (d.material as THREE.SpriteMaterial).color.set(0xffe0b0);
+      d.position.set(f.position.x, f.position.y, f.position.z - h * 0.35 + 1.1 + i * 1.25); d.scale.setScalar(0.9 - i * 0.14); d.visible = false; exterior.add(d); diamonds.push(d);
+    }
+  }
+  // weapons-bay doors under the fuselage, hinged on their outer edges
+  const bayDoors: THREE.Group[] = [];
+  if (id !== 'DRONE') for (const sx of [-1, 1]) {
+    const hinge = new THREE.Group(); hinge.position.set(sx * 0.62, -0.62, cfgD.length * 0.04);
+    const door = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.04, cfgD.length * 0.28), hull); door.position.x = -sx * 0.29; hinge.add(door);
+    exterior.add(hinge); bayDoors.push(hinge);
+  }
+  const liftPlumes: THREE.Sprite[] = [];
+  if (id === 'F35') for (const z of [-cfgD.length * 0.2, cfgD.length * 0.36]) {
+    const lp = new THREE.Sprite(glowMat.clone()); (lp.material as THREE.SpriteMaterial).color.set(0xbfd6ff); lp.position.set(0, -1.6, z); lp.scale.set(2.2, 4.5, 1); lp.visible = false; exterior.add(lp); liftPlumes.push(lp);
   }
   const vaporCone = new THREE.Mesh(new THREE.ConeGeometry(cfgD.wingspan * 0.42, cfgD.length * 0.55, 28, 1, true), new THREE.MeshBasicMaterial({ color: 0xf4f8ff, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
   vaporCone.rotation.x = -Math.PI / 2; vaporCone.position.z = cfgD.length * 0.08; vaporCone.visible = false; exterior.add(vaporCone);
@@ -316,7 +341,7 @@ export function buildAircraft(id: AircraftId, opts: { girlPilot?: boolean } = {}
   gear.visible = true;
   const hullRef = hull;
   return {
-    group, afterburners, stores, strobes, glows, vaporCone, navLights, cockpit, exterior, pilotHead, gear, airbrakes,
+    group, afterburners, stores, strobes, glows, vaporCone, bayDoors, diamonds, liftPlumes, navLights, cockpit, exterior, pilotHead, gear, airbrakes,
     setLivery(color: number) { hullRef.color.setHex(color); },
   };
 }

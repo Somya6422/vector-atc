@@ -44,6 +44,8 @@ export class TargetingSystem {
   private lastSelectedId = '';
 
   constructor(private owner: Unit, private enemies: () => Unit[], private jamming: () => number = () => 0) {}
+  /** F-35 sensor fusion (AN/APG-81 + DAS + EOTS): 20 % more radar range and twice-as-fast identification */
+  private get fusion() { return this.owner.cfg.id === 'F35' ? 1.2 : 1; }
 
   /** Off-boresight angle (rad) from the owner's nose to a world point. */
   offBoresight(p: THREE.Vector3): number {
@@ -63,7 +65,7 @@ export class TargetingSystem {
       if (!u.alive || u === me) continue;
       const range = u.pos.distanceTo(me.pos);
       const off = this.offBoresight(u.pos);
-      const effRange = SENSOR.radarRange * Math.pow(u.cfg.rcs, 0.25) * (1 - 0.5 * this.jamming());
+      const effRange = SENSOR.radarRange * Math.pow(u.cfg.rcs, 0.25) * (1 - 0.5 * this.jamming()) * this.fusion;
       const inScan = off <= SENSOR.scanHalfAngle && range <= effRange;
       const los = inScan && lineOfSight(me.pos.x, me.pos.y, me.pos.z, u.pos.x, u.pos.y, u.pos.z, 300);
       _r.copy(u.vel).sub(me.vel);
@@ -116,7 +118,7 @@ export class TargetingSystem {
     if (!this.selected || !c) return;
     if (this.selected.identified) { this.idProgress = 1; return; }
     if (c.range <= SENSOR.idRange && c.offBoresight <= SENSOR.boreCone && c.los) {
-      this.idProgress = Math.min(1, this.idProgress + dt / SENSOR.idTime);
+      this.idProgress = Math.min(1, this.idProgress + dt / SENSOR.idTime * (this.fusion > 1 ? 2 : 1));
       if (this.idProgress >= 1) this.selected.identified = true;
     } else this.idProgress = Math.max(0, this.idProgress - dt * 0.5);
   }

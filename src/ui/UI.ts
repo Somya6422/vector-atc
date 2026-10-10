@@ -8,7 +8,7 @@ import { AIRCRAFT } from '../flight/AircraftConfig';
 import { ACTIONS, bindings, keyName } from '../game/Bindings';
 
 export type UIAction =
-  | 'new_campaign' | 'continue' | 'mission_select' | 'hangar' | 'aircraft' | 'flight_school' | 'settings' | 'credits' | 'exit' | 'main_menu'
+  | 'commands' | 'new_campaign' | 'continue' | 'mission_select' | 'hangar' | 'aircraft' | 'flight_school' | 'settings' | 'credits' | 'exit' | 'main_menu'
   | 'change_route' | 'pick_route' | 'briefing' | 'launch' | 'resume' | 'objectives' | 'map' | 'controls' | 'briefing_review' | 'restart' | 'return_hangar'
   | 'reset_keys' | 'debrief_continue' | 'debrief_replay' | 'retry' | 'select_mission' | 'livery' | 'back' | 'save' | 'reset_save' | 'close_overlay';
 
@@ -97,6 +97,7 @@ export class UI {
         <button data-a="aircraft" ${hasCampaign ? '' : 'disabled'}>Aircraft &amp; Pilot</button>
         <button data-a="flight_school" ${hasCampaign ? '' : 'disabled'}>Flight School</button>
         <button data-a="settings">Settings</button>
+        <button data-a="commands">Commands &amp; Shortcuts</button>
         <button data-a="controls">Controls / Keyboard</button>
         <button data-a="credits">Credits</button>
         <button data-a="exit">Exit</button>
@@ -234,6 +235,7 @@ export class UI {
         <button data-a="resume">Resume</button>
         <button data-a="objectives">Objectives</button>
         <button data-a="map">Map</button>
+        <button data-a="commands">Commands &amp; Shortcuts</button>
         <button data-a="controls">Controls</button>
         <button data-a="settings">Settings</button>
         <button data-a="briefing_review">Briefing review</button>

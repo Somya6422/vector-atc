@@ -15,6 +15,7 @@ import { FIELD_ELEV, RADAR_SITES, RUNWAY, START_POS, WORLD, WAYPOINTS, blizzardA
 import { approachInfo, chooseRunwayDirection } from '../world/Landing';
 import { HUD, type CameraView, type HudWarnings, type MfdMode } from '../avionics/HUD';
 import { Autopilot } from '../flight/Autopilot';
+import { SpecialFlight } from '../flight/Special';
 import { terrainAvoid } from '../ai/Maneuvers';
 import { CameraRig, VIEW_LABEL } from './CameraRig';
 import { bindings, keyName } from './Bindings';
@@ -88,6 +89,12 @@ export class FlightSession {
   private fbwGcas = false;
   private aoaLimited = false;
   private fbwAp = new Autopilot();
+  private bankDeg = 0;
+  readonly special: SpecialFlight;
+  private ecmT = 0; private ecmCd = 0;
+  private bayT = new Map<Unit, number>(); private storeCount = new Map<Unit, number>();
+  private bankHold: number | null = null;
+  private turnAssist = false;
   /** supply drops / pickups shown on the TSA map (used by wave survival) */
   pickups: { x: number; y: number; z: number; label: string }[] = [];
   private disposers: (() => void)[] = [];
@@ -133,6 +140,8 @@ export class FlightSession {
     const host = this.makeHost();
     this.director = new MissionDirector(host, o.missionId);
     this.assists = new Assists(this.player, this.fc, this.director);
+    this.special = new SpecialFlight(this.player);
+    this.special.onMessage = s => { this.o.onVoiceMessage?.(s); this.flash(s, 2.5); };
     this.assists.onMessage = s => { this.o.onVoiceMessage?.(s); this.flash(s, 2.5); };
     for (const [i, d] of this.drones.entries()) {
       const z0 = -27000 - (i % 2) * 1500;
@@ -391,7 +400,7 @@ export class FlightSession {
     // once the engines are running the aircraft starts rolling forward by itself (no key needed); wheel brakes keep taxi speed sane
     if (dir.startupProgress >= 1 && !this.autoRolled) { this.autoRolled = true; this.fc.throttle = Math.max(this.fc.throttle, 0.3); }
     if (pm.onGround && c.throttle < 0.6 && pm.vel.length() > 9) c.airbrake = true;
-    pm.step(FlightModel.DT, c);
+    if (!this.special.step(FlightModel.DT, this.fc)) pm.step(FlightModel.DT, c);
     // --- AI @30 Hz ---
     const aiDt = FlightModel.DT * 4;
     if (this.stepNo % 4 === 0) {
@@ -406,7 +415,7 @@ export class FlightSession {
       }
       for (const [i, b] of this.bandits.entries()) {
         const d = this.drones[i]; if (d.dormant || !d.alive) continue;
-        this.droneCtl.set(d.id, b.update(aiDt, { now: this.elapsed, weapons: this.weapons, enemies: [p, this.wingman].filter(u => u.alive), alerted: this.alertedBandits, jamming: 0 }));
+        this.droneCtl.set(d.id, b.update(aiDt, { now: this.elapsed, weapons: this.weapons, enemies: [p, this.wingman].filter(u => u.alive), alerted: this.alertedBandits, jamming: this.ecmT > 0 ? 0.7 : 0 }));
       }
     }
     if (!this.wingman.model.crashed) this.wingman.model.step(FlightModel.DT, this.wingCtl);
@@ -420,7 +429,7 @@ export class FlightSession {
   private handleInput(dt: number) {
     const inp = this.o.input, p = this.player, ts = this.targeting, st = this.o.settings.data;
     this.fc.invertPitch = st.invertPitch;
-    const mouseOn = st.mouseFlight && !this.o.camera.freeLook && this.assists.auto === 'none' && !this.player.model.crashed;
+    const mouseOn = st.mouseFlight && !this.o.camera.freeLook && this.assists.auto === 'none' && !this.player.model.crashed && !this.special.active;
     inp.wantLock = st.mouseFlight;
     this.mouseNorm = mouseOn ? { x: 0, y: 0 } : null;
     this.fc.update(inp, dt, mouseOn ? this.aimStep(inp, dt) : (this.aimReady = false, null));
@@ -428,6 +437,10 @@ export class FlightSession {
     const manual = inp.held('pitchUp') || inp.held('pitchDown') || inp.held('rollLeft') || inp.held('rollRight') || inp.held('yawLeft') || inp.held('yawRight') || (!!this.mouseNorm && Math.abs(inp.mouseDX) + Math.abs(inp.mouseDY) > 3);
     this.assists.update(dt, this.elapsed, this.assists.auto === 'taxi' ? false : manual, inp.held('throttleUp') || inp.held('throttleDown'));
     this.flyByWire(dt);
+    if (inp.wasPressed('stovl')) this.flash(this.voiceExec({ t: 'stovl' }), 2.4);
+    if (inp.wasPressed('cobra')) this.flash(this.voiceExec({ t: 'cobra' }), 2);
+    if (inp.wasPressed('kulbit')) this.flash(this.voiceExec({ t: 'kulbit' }), 2);
+    if (inp.wasPressed('ecm')) this.flash(this.voiceExec({ t: 'ecm' }), 2);
     if (inp.wasPressed('recover')) this.flash(this.assists.startRecover(), 2.2);
     if (inp.wasPressed('mfd')) { this.mfdMode = this.mfdMode === 'full' ? 'clean' : 'full'; this.flash(this.mfdMode === 'full' ? 'MFDs: FULL' : 'MFDs: CLEAN HUD', 1.2); }
     if (inp.wasPressed('autopilot')) this.flash(this.assists.active ? this.voiceExec({ t: 'ap_off' }) : this.voiceExec({ t: 'level' }), 2);
@@ -530,7 +543,36 @@ export class FlightSession {
   private flyByWire(dt: number) {
     const m = this.player.model, cfg = this.player.cfg, fc = this.fc;
     this.aoaLimited = false;
-    if (!this.o.settings.data.fbw || m.onGround || m.crashed || this.assists.active) { this.fbwGcas = false; return; }
+    if (!this.o.settings.data.fbw || m.onGround || m.crashed || this.assists.active || this.special.active) { this.fbwGcas = false; return; }
+    // ---- bank management for keyboard flight (mouse-aim flies its own laws) ----
+    if (!this.mouseNorm) {
+      const right = _ar.set(1, 0, 0).applyQuaternion(m.q), up = _ab.set(0, 1, 0).applyQuaternion(m.q);
+      const bank = Math.atan2(right.y, up.y);             // < 0 = right wing down
+      const rollRate = m.w.z;                              // > 0 = rolling left
+      this.bankDeg = bank / DEG;
+      if (!fc.keyRoll) {
+        // stick released: stop the roll and hold the bank angle it was released at; small banks settle to wings level
+        if (this.bankHold === null) this.bankHold = Math.abs(bank) < 8 * DEG ? 0 : bank;
+        const err = bank - this.bankHold;
+        fc.roll = clamp(rollRate / cfg.maxRollRate * 2.4 + err * 2.2, -1, 1);
+      } else {
+        this.bankHold = null;
+        if (fc.rollHoldT < 1.2) {
+          // a quick press banks the jet up to ~70 deg and stops there; keep holding past 1.2 s for a full aileron roll
+          const further = (fc.roll > 0 && bank < 0) || (fc.roll < 0 && bank > 0);
+          if (further && Math.abs(bank) > 45 * DEG) fc.roll *= clamp((66 * DEG - Math.abs(bank)) / (21 * DEG), 0, 1);
+        }
+      }
+      // turn assist: in a banked turn with no pitch input, pull just enough to keep the turn level
+      const ab = Math.abs(bank);
+      if (!fc.keyPitch && ab > 10 * DEG && ab < 86 * DEG && !m.stalled && m.vel.length() > 60) {
+        // body pitch rate of a level coordinated turn: q = g·tan(φ)·sin(φ)/V, plus a flight-path correction
+        const V = m.vel.length(), gamma = Math.asin(clamp(m.vel.y / V, -1, 1));
+        const q = 9.81 * Math.tan(ab) * Math.sin(ab) / V;
+        fc.pitch = clamp(q * 1.25 / cfg.maxPitchRate - gamma * 7, 0, 0.95);
+        this.turnAssist = true;
+      } else this.turnAssist = false;
+    } else this.turnAssist = false;
     const lim = cfg.alphaCrit * 0.8;
     if (fc.pitch > 0 && m.alpha > lim) { fc.pitch *= clamp((cfg.alphaCrit * 0.92 - m.alpha) / (cfg.alphaCrit * 0.12), 0, 1); this.aoaLimited = true; }
     if (this.gcas || this.fbwGcas) {
@@ -540,6 +582,17 @@ export class FlightSession {
         this.fbwGcas = true; fc.pitch = c.pitch; fc.roll = c.roll; fc.throttle = Math.max(fc.throttle, 0.9);
       } else this.fbwGcas = false;
     }
+  }
+
+  /** Electronic attack: 8 s of noise jamming. Radar-guided missiles on us may lose lock; enemy radars see less. */
+  private activateEcm(): string {
+    if (this.ecmT > 0) return `Jammer already active (${Math.ceil(this.ecmT)} s).`;
+    if (this.ecmCd > 0) return `Jammer recharging – ${Math.ceil(this.ecmCd)} s.`;
+    this.ecmT = 8; this.ecmCd = 26;
+    let broke = 0;
+    for (const mm of this.weapons.threatsTo(this.player)) if (mm.spec.id === 'RADAR' && Math.random() < 0.65) { mm.mode = 'LOST'; broke++; }
+    this.o.audio.uiConfirm();
+    return broke ? `Jammer on – ${broke} radar missile${broke > 1 ? 's' : ''} lost lock.` : 'Jammer on for 8 seconds.';
   }
 
   /** Screen position of a direction from the player's jet (clamped to the screen when behind / off to the side). */
@@ -574,7 +627,11 @@ export class FlightSession {
       case 'airbrake': fc.brakeLatch = c.on; return c.on ? 'Airbrake out.' : 'Airbrake in.';
       case 'flares': return this.weapons.dropFlares(p, this.elapsed) ? 'Flares and chaff away.' : (p.flares <= 0 ? 'Flares empty.' : 'Countermeasures recycling.');
       case 'ap_off': A.off(); fc.brakeLatch = false; return 'Autopilot off – you have control.';
-      case 'recover': return A.startRecover();
+      case 'recover': if (this.special.active) return 'Busy with a manoeuvre.'; return A.startRecover();
+      case 'cobra': { const r = this.special.startCobra(); if (this.special.active) A.off(); return r; }
+      case 'kulbit': { const r = this.special.startKulbit(); if (this.special.active) A.off(); return r; }
+      case 'stovl': { A.off(); return this.special.toggleStovl(fc); }
+      case 'ecm': return this.activateEcm();
       case 'level': return needAir() ?? (A.engage({ hdg: m.heading * DEG, alt: m.pos.y, gamma: null, bank: null, nav: null }) ?? 'Wings level, holding altitude and heading.');
       case 'hold_alt': return needAir() ?? (A.engage({ alt: m.pos.y }) ?? `Holding ${Math.round(m.pos.y / 0.3048)} ft.`);
       case 'hold_hdg': return needAir() ?? (A.engage({ hdg: m.heading * DEG }) ?? `Holding heading ${Math.round(m.heading)}.`);
@@ -739,7 +796,7 @@ export class FlightSession {
       v.gear.visible = m.gearPos > 0.06; v.gear.scale.y = Math.max(0.05, m.gearPos);
       const ab = m.afterburner ? 1 : 0;
       for (const f of v.afterburners) {
-        const mat = f.material as THREE.MeshBasicMaterial; mat.opacity = ab * (0.55 + 0.35 * Math.sin(t * 60 + f.position.x)) + (m.engineOn ? m.engineN * 0.12 : 0);
+        const mat = f.material as THREE.MeshBasicMaterial; mat.opacity = ab * (0.32 + 0.12 * Math.sin(t * 60 + f.position.x)) + (m.engineOn ? m.engineN * 0.06 : 0);
         f.scale.set(1, 1 + 0.15 * Math.sin(t * 45), 1);
       }
       for (const a of v.airbrakes) a.rotation.x = -m.airbrakePos * 0.9;
@@ -750,8 +807,16 @@ export class FlightSession {
       const vk = clamp(1 - Math.abs(m.mach - 0.985) / 0.055, 0, 1) * (m.pos.y < 7500 ? 1 : 0);
       v.vaporCone.visible = vk > 0.02;
       if (v.vaporCone.visible) { (v.vaporCone.material as THREE.MeshBasicMaterial).opacity = vk * 0.32 * (0.8 + 0.2 * Math.sin(t * 37)); v.vaporCone.scale.set(1, 0.9 + 0.1 * vk, 1); }
-      const left = u.irMissiles + u.radarMissiles;
-      v.stores.forEach((s, i) => { s.visible = i < left; });
+      const left = u.irMissiles + u.radarMissiles, prevLeft = this.storeCount.get(u) ?? left;
+      if (left < prevLeft) this.bayT.set(u, 1.4);
+      this.storeCount.set(u, left);
+      const bay = this.bayT.get(u) ?? 0, open = clamp(bay > 1.1 ? (1.4 - bay) / 0.3 : bay / 0.5, 0, 1);
+      if (bay > 0) this.bayT.set(u, Math.max(0, bay - dt));
+      v.bayDoors.forEach((d, i) => { d.rotation.z = (i === 0 ? 1 : -1) * 1.35 * open; });
+      v.stores.forEach((s, i) => { s.visible = open > 0.3 && i < left; });          // carried internally: seen only while the bay is open
+      v.diamonds.forEach((d, i) => { d.visible = m.afterburner; if (d.visible) (d.material as THREE.SpriteMaterial).opacity = (0.55 - (i % 4) * 0.1) * (0.8 + 0.2 * Math.sin(t * 61 + i)); });
+      const lift = u === this.player ? this.special.nozzleDown : 0;
+      v.liftPlumes.forEach(lp => { lp.visible = lift > 0.2 && m.engineOn; (lp.material as THREE.SpriteMaterial).opacity = lift * 0.55 * (0.85 + 0.15 * Math.sin(t * 47)); });
       const cockpitView = u === this.player && this.o.camera.view === 'cockpit';
       v.cockpit.visible = cockpitView;
       v.exterior.visible = !cockpitView;
@@ -779,6 +844,7 @@ export class FlightSession {
     const phase = this.director.phase;
     const showILS = phase === 'P5_RTB' && !pm.onGround && info.dz < 16000 && info.dz > -800;
     const prompt = this.contextPrompt();
+    if (this.ecmT > 0) this.ecmT = Math.max(0, this.ecmT - dt); if (this.ecmCd > 0) this.ecmCd = Math.max(0, this.ecmCd - dt);
     const egtTarget = pm.engineOn ? 360 + 430 * pm.engineN + (pm.afterburner ? 240 : 0) : 20;
     this.egt += (egtTarget - this.egt) * Math.min(1, dt * 0.7);
     const dl = o.dialogue;
@@ -789,9 +855,11 @@ export class FlightSession {
       warnings: this.warnings, prompt, hint: this.hintText, metric: o.settings.data.metric, radarRangeKm: this.radarRanges[this.radarIdx], startup: this.director.engineStartRequested ? this.director.startupProgress : 0,
       debug: this.debug ? this.debugLines() : null, weaponMsg: this.weaponMsg, freeLook: cam.freeLook,
       guidance: { dirNorth: info.dirNorth, dz: info.dz, lateral: info.lateral, gsError: info.gsError, show: showILS }, helpKeys: '',
-      assist: this.assists.describe(),
+      assist: this.special.label ?? this.assists.describe(),
       bgLum: o.scene.bgLum, mfd: this.mfdMode,
-      sys: { egt: this.egt, fbw: o.settings.data.fbw, gcasActive: this.fbwGcas, aoaLimited: this.aoaLimited, recovering: this.assists.auto === 'recover' },
+      sys: { egt: this.egt, fbw: o.settings.data.fbw, gcasActive: this.fbwGcas, aoaLimited: this.aoaLimited, recovering: this.assists.auto === 'recover',
+        ecm: this.ecmT > 0 ? `ACTIVE ${Math.ceil(this.ecmT)}s` : this.ecmCd > 0 ? `${Math.ceil(this.ecmCd)}s` : 'READY', supercruise: pm.mach > 1.0 && !pm.afterburner && !pm.onGround },
+      das: p.cfg.id === 'F35' ? this.weapons.threatsTo(p).map(mm => ({ bearing: Math.atan2(mm.pos.x - pm.pos.x, -(mm.pos.z - pm.pos.z)) - pm.heading * DEG, range: mm.pos.distanceTo(pm.pos), ir: mm.spec.id === 'IR' })) : null,
       comms: { lines: dl.history.slice(-4).map(h => ({ who: h.speaker, text: h.text })), active: !!dl.current, level: dl.current?.radio ? 1 : 0.6, mic: o.micOn?.() ?? false },
       radarSites: this.director.spec.radar === false ? [] : RADAR_SITES.map(r => ({ x: r.x, z: r.z, range: r.range })),
       pickups: this.pickups.map(p => ({ x: p.x, z: p.z, label: p.label })),
@@ -814,9 +882,13 @@ export class FlightSession {
       btns.push({ label: 'START ENGINES', title: 'Same as pressing F', cmd: { t: 'start_engines' }, hot: true });
     } else if (m.onGround && !m.engineOn) {
       step = 'Engines spooling up… wait a few seconds.';
+    } else if (this.special.active) {
+      step = this.special.label;
+      btns.push({ label: this.special.mode === 'hover' ? 'FORWARD FLIGHT' : 'HOVER', title: 'STOVL (J)', cmd: { t: 'stovl' } });
     } else if (m.onGround && m.vel.length() < 3 && !onRwy) {
       step = 'Step 2: drive to the runway. Click AUTO-TAXI, or steer with A/D and Ctrl+W.';
       btns.push({ label: 'AUTO-TAXI', title: 'Taxi to runway 36 automatically', cmd: { t: 'taxi' }, hot: true });
+      if (this.player.cfg.id === 'F35') btns.push({ label: 'VERTICAL TAKE-OFF', title: 'STOVL (J): lift fan open, then throttle above 50%', cmd: { t: 'stovl' } });
     } else if (m.onGround && onRwy && m.vel.length() < 25) {
       step = 'Step 3: take off. Click AUTO-TAKEOFF, or hold Ctrl+W (full power) and pull back with W at about 135 kt.';
       btns.push({ label: 'AUTO-TAKEOFF', title: 'Automatic take-off and climb', cmd: { t: 'autotakeoff' }, hot: true });
@@ -829,11 +901,13 @@ export class FlightSession {
       btns.push({ label: fc.gearDown ? 'GEAR UP' : 'GEAR DOWN', title: 'Landing gear (G)', cmd: { t: 'gear', down: !fc.gearDown } });
       btns.push({ label: 'AUTOLAND', title: 'Land automatically (costs 300 score points)', cmd: { t: 'autoland' } });
       btns.push({ label: 'RECOVER', title: 'Panic recovery: wings level and climb (L)', cmd: { t: 'recover' }, hot: this.gcas || m.stalled });
+      if (this.player.cfg.id === 'SU57') { btns.push({ label: 'COBRA', title: "Pugachev's Cobra (U) – 200–470 kt, wings level", cmd: { t: 'cobra' } }); btns.push({ label: 'KULBIT', title: 'Kulbit somersault (O) – 220–480 kt', cmd: { t: 'kulbit' } }); }
+      if (this.player.cfg.id === 'F35') btns.push({ label: this.special.mode === 'hover' || this.special.mode === 'transIn' ? 'FORWARD FLIGHT' : 'HOVER', title: 'STOVL (J): convert between hover and wing-borne flight', cmd: { t: 'stovl' }, on: this.special.mode === 'hover' });
+      if (this.ecmT > 0) btns.push({ label: 'ECM ON', title: 'Jammer active', cmd: { t: 'ecm' }, on: true });
     }
     if (m.onGround && m.engineOn && A.auto === 'none') btns.push({ label: 'BRAKES', title: 'Toggle wheel brakes', cmd: { t: 'brake', on: !fc.brakeLatch }, on: fc.brakeLatch });
-    btns.push({ label: 'CAMERA', title: 'Change camera angle (5)', cmd: { t: 'camera', next: true } });
-    btns.push({ label: 'HINT', title: 'Ground Control hint (H)', cmd: { t: 'hint' } });
     btns.push({ label: '⦿ ACTIONS', title: 'Action dial (Tab)', cmd: { t: 'radial' } });
+    btns.push({ label: '⌨ KEYS', title: 'All commands & shortcut keys (/)', cmd: { t: 'help' } });
     btns.push({ label: '? GUIDE', title: 'Quick-start guide (I)', cmd: { t: 'guide' } });
     return { step, buttons: btns };
   }

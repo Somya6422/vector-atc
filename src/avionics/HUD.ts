@@ -20,6 +20,8 @@ export interface HudSystems {
   gcasActive: boolean;    // automatic ground-collision recovery is flying the jet
   aoaLimited: boolean;    // the AoA limiter is trimming the stick this frame
   recovering: boolean;    // panic auto-recovery running
+  ecm: string;            // jammer state for the DMS
+  supercruise: boolean;   // supersonic without afterburner
 }
 export interface HudComms { lines: { who: string; text: string }[]; active: boolean; level: number; mic: boolean }
 export interface HudInput {
@@ -51,6 +53,8 @@ export interface HudInput {
   comms: HudComms;
   radarSites: { x: number; z: number; range: number }[];
   pickups: { x: number; z: number; label: string }[];
+  /** F-35 Distributed Aperture System: bearings (rad, relative to the nose) of missiles guiding on us – 360° */
+  das: { bearing: number; range: number; ir: boolean }[] | null;
 }
 
 // ---- adaptive palette: pastel glow on dark backgrounds, deep saturated green with a dark halo on snow / bright sky ----
@@ -151,6 +155,7 @@ export class HUD {
     this.scaled(() => { this.drawMission(s); this.drawPrompt(s); });
     if (s.mission && s.mission.phase === 'P2_TRANSIT') this.scaled(() => this.drawDetect(s));
     if (s.guidance?.show) this.scaled(() => this.drawLanding(s));
+    if (s.das && s.das.length) this.drawDas(s);
     if (s.mouse) this.drawMouse(s);
     if (s.debug) this.drawDebug(s);
     g.shadowBlur = 0;
@@ -254,6 +259,7 @@ export class HUD {
     g.fillStyle = Math.abs(m.gLoad) > s.player.cfg.gLimit * 0.9 ? AMBER : GREEN; g.fillText(`G ${m.gLoad.toFixed(1)}`, x - 6, this.H / 2 + 52);
     g.fillStyle = m.alpha > s.player.cfg.alphaCrit * 0.8 ? AMBER : DIM; g.fillText(`α ${(m.alpha / DEG).toFixed(0)}°`, x - 6, this.H / 2 + 68);
     if (m.iasKt < 135 && m.onGround && m.throttleCmd > 0.5) { g.fillStyle = AMBER; g.fillText('ROTATE @135', x - 6, this.H / 2 - 40); }
+    if (s.sys.supercruise) { g.fillStyle = CYAN; g.fillText('SUPERCRUISE', x - 6, this.H / 2 + 84); }
     g.font = '13px Consolas, monospace';
   }
   private drawAltTape(s: HudInput) {
@@ -495,6 +501,7 @@ export class HUD {
     g.fillStyle = ts.lock === 'LOCK' ? RED : ts.weapon === 'GUN' || chk.ok ? GREEN : AMBER;
     g.fillText(ts.weapon === 'GUN' ? `${st} · SPACE/LMB` : chk.ok ? `${st} · SPACE: LAUNCH` : `${st} · ${chk.reason}`, x0 + 10, by + 18);
     g.fillStyle = p.flares < 8 ? AMBER : DIM; g.fillText(`FLR ${p.flares}${p.flareCooldown > 0 ? ' …' : ''} [X]`, x0 + 10, by + 34);
+    g.fillStyle = s.sys.ecm.startsWith('ACTIVE') ? CYAN : DIM; g.fillText(`ECM ${s.sys.ecm}`, x0 + 82, by + 34);
     const fbw = s.sys.gcasActive ? 'AUTO-GCAS' : s.sys.recovering ? 'RECOVERY' : s.sys.aoaLimited ? 'AOA LIMIT' : s.sys.fbw ? 'FBW ON' : 'FBW OFF';
     g.fillStyle = s.sys.gcasActive || s.sys.recovering ? AMBER : s.sys.fbw ? GREEN : DIM; g.textAlign = 'right'; g.fillText(fbw, x0 + S - 10, by + 34);
     g.font = '13px Consolas, monospace'; g.lineWidth = 1.6;
@@ -626,6 +633,18 @@ export class HUD {
     g.fillText(`RWY ${gd.dirNorth ? '36' : '18'}  ${(Math.max(0, gd.dz) / 1000).toFixed(1)}km  ${m.gearDown ? 'GEAR ✓' : 'GEAR!'}`, cx, cy + 72);
     g.fillText(`${Math.round(m.iasKt)} kt  →  ${s.player.cfg.touchdownKt} touchdown`, cx, cy + 88);
     g.restore();
+  }
+
+  /** F-35 DAS: every missile guiding on us, at its true bearing around the nose, through the airframe. */
+  private drawDas(s: HudInput) {
+    const g = this.g, cx = this.W / 2, cy = this.H / 2, R = Math.min(this.W, this.H) * 0.33, flash = Math.floor(s.now * 4) % 2 === 0;
+    g.save(); g.strokeStyle = RED; g.fillStyle = RED; g.lineWidth = 2; g.globalAlpha = 0.35; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.stroke(); g.globalAlpha = 1;
+    for (const d of s.das!) {
+      const x = cx + Math.sin(d.bearing) * R, y = cy - Math.cos(d.bearing) * R, a = d.bearing;
+      g.save(); g.translate(x, y); g.rotate(a); g.beginPath(); g.moveTo(0, -14); g.lineTo(9, 6); g.lineTo(-9, 6); g.closePath(); if (flash) g.fill(); else g.stroke(); g.restore();
+      g.font = 'bold 11px Consolas, monospace'; g.textAlign = 'center'; g.fillText(`${d.ir ? 'IR' : 'RDR'} ${(d.range / 1000).toFixed(1)}`, cx + Math.sin(a) * (R + 22), cy - Math.cos(a) * (R + 22));
+    }
+    g.font = 'bold 11px Consolas, monospace'; g.fillText('DAS', cx, cy - R - 10); g.restore();
   }
 
   /** Mouse-aim: the aim point (where the pointer sends the nose) and the nose marker that is flown onto it. */

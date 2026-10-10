@@ -11,7 +11,7 @@ export type Cmd =
   | { t: 'heading'; deg: number } | { t: 'pitch'; deg: number }
   | { t: 'goto_nav' } | { t: 'goto_home' } | { t: 'autoland' } | { t: 'autotakeoff' } | { t: 'taxi' } | { t: 'stop' }
   | { t: 'weapon'; w: 'GUN' | 'IR' | 'RADAR' } | { t: 'target' } | { t: 'fire'; w?: 'GUN' | 'IR' | 'RADAR' } | { t: 'cease' }
-  | { t: 'recover' }
+  | { t: 'recover' } | { t: 'cobra' } | { t: 'kulbit' } | { t: 'stovl' } | { t: 'ecm' }
   | { t: 'wing'; cmd: 'cover' | 'engage' | 'rejoin' | 'formation' | 'rtb'; f?: 'ECHELON_RIGHT' | 'LINE_ABREAST' | 'TRAIL' } | { t: 'wing_report' }
   | { t: 'report'; what: 'status' | 'fuel' | 'altitude' | 'speed' | 'heading' | 'enemies' | 'airfield' }
   | { t: 'camera'; view?: 'chase' | 'cockpit' | 'wing' | 'tail' | 'orbit' | 'front' | 'target' | 'tactical' | 'tower' | 'cinematic' | 'flyby'; next?: boolean } | { t: 'mouse'; on?: boolean } | { t: 'radar_range'; km: number }
@@ -69,7 +69,7 @@ function parseClause(s: string, raw: string): Cmd[] {
   if (has(/\b(go|back|return) (to )?(the )?hangar\b|\bhangar\b/)) return [{ t: 'hangar' }];
   if (has(/\b(main menu|exit to menu|quit to menu|go to menu)\b/)) return [{ t: 'menu' }];
   if (has(/\bsettings\b|\boptions\b/)) return [{ t: 'settings' }];
-  if (has(/\b(controls|keyboard|key bindings?|keybinds?)\b/)) return [{ t: 'controls' }];
+  if (has(/\b(controls|keyboard|key bindings?|keybinds?|shortcuts?|commands list|show (the )?commands|what can i say|help me with (the )?keys)\b/)) return [{ t: 'controls' }];
   if (has(/\bcredits\b/)) return [{ t: 'credits' }];
   if (has(/^interact$/)) return [{ t: 'interact' }];
   if (has(/^(go )?back$|^close( this| it)?$|^cancel$|^never ?mind$/)) return [{ t: 'back' }];
@@ -111,11 +111,15 @@ function parseClause(s: string, raw: string): Cmd[] {
 
   // ---- autopilot / navigation assists ----
   if (has(/\b(auto ?land|land (the )?(aircraft|plane|jet|for me)|request landing|land now|land (on|at) (the )?runway|bring (it|me) in)\b|^land$/)) return [{ t: 'autoland' }];
-  if (has(/\b(auto ?takeoff|take ?off|depart|take off now)\b/)) return [{ t: 'autotakeoff' }];
+  if (!has(/\bvertical\b/) && has(/\b(auto ?takeoff|take ?off|depart|take off now)\b/)) return [{ t: 'autotakeoff' }];
   if (has(/\btaxi\b/)) return [{ t: 'taxi' }];
   if (has(/\b(take me|fly me|go|head|return|rtb|bring me)\b.*\b(home|back to base|the airfield|base)\b|\b(rtb|return to base)\b/)) return [{ t: 'goto_home' }];
   if (has(/\b(fly|go|head|navigate|proceed)( to| toward| towards)?( the)?( next)?( waypoint| nav point| nav| objective)\b|\bnext waypoint\b/)) return [{ t: 'goto_nav' }];
   if (has(/\b(autopilot|auto pilot)\b.*\b(off|disengage|cancel)\b|\b(disengage|cancel|kill) (the )?(autopilot|auto pilot|assist)\b|\bmanual( control)?\b|\bi have (control|the aircraft)\b|\bstand down autopilot\b/)) return [{ t: 'ap_off' }];
+  if (has(/\b(cobra|pugachev)\b/)) return [{ t: 'cobra' }];
+  if (has(/\b(kulbit|kulbeet|somersault|backflip|back flip)\b/)) return [{ t: 'kulbit' }];
+  if (has(/\b(hover|stovl|vtol|vertical (take ?off|landing|lift)|lift fan|convert to (hover|forward flight)|transition( to forward flight)?|forward flight)\b/)) return [{ t: 'stovl' }];
+  if (has(/\b(ecm|jammer|jamming|jam (them|the radar|radar)|electronic (warfare|attack|countermeasures))\b/)) return [{ t: 'ecm' }];
   if (has(/\b(recover|auto ?recover(y)?|panic|save me|spin recovery|i ?a?m lost|i ?a?m spinning|unusual attitude)\b/)) return [{ t: 'recover' }];
   if (has(/\b(level (the )?wings|wings level|level (out|off)|straight and level|fly level)\b/)) return [{ t: 'level' }];
   if (has(/\b(hold|maintain|keep)( this| the| current)? (altitude|height)\b/)) return [{ t: 'hold_alt' }];

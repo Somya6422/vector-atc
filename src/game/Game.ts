@@ -7,6 +7,7 @@ import { loadModels } from '../flight/ModelCache';
 import { loadPilotModels } from '../characters/PilotModels';
 import { VoiceController } from '../voice/VoiceController';
 import { PilotBar } from '../ui/PilotBar';
+import { CommandsSheet } from '../ui/CommandsSheet';
 import type { Cmd } from '../voice/CommandParser';
 import { loadDem } from '../world/Dem';
 import { ACTIONS, bindings } from './Bindings';
@@ -45,6 +46,7 @@ export class Game {
   readonly map = new MapView();
   voice!: VoiceController;
   pilotBar!: PilotBar;
+  commands!: CommandsSheet;
   session: FlightSession | null = null;
   hangar: HangarScene | null = null;
   route: Route = 'A_BOY_SU57';
@@ -92,6 +94,8 @@ export class Game {
       this.audio.uiClick();
       this.voice.say(this.session.voiceExec(c));
     };
+    this.commands = new CommandsSheet(host);
+    this.pilotBar.onHelp = () => this.commands.toggle();
     this.pilotBar.onDialOpen = () => { try { document.exitPointerLock?.(); } catch { /* not locked */ } };
     window.setInterval(() => {
       const on = !!this.session && this.fsm.inFlight && !this.session.paused;
@@ -164,6 +168,8 @@ export class Game {
     if (code === bindings.code('voice') && (this.fsm.inFlight || st === 'HANGAR' || st === 'PAUSED' || !(document.activeElement instanceof HTMLButtonElement))) { this.voice.focus(); return true; }
     if (code === bindings.code('radial') && this.session && this.fsm.inFlight) { this.pilotBar.toggleDial(); return true; }
     if (code === bindings.code('guide') && this.session && (this.fsm.inFlight || st === 'PAUSED')) { this.pilotBar.toggleGuide(); return true; }
+    if (code === bindings.code('help')) { this.commands.toggle(); return true; }
+    if (this.commands.open && code === 'Escape') { this.commands.show(false); return true; }
     if (code === bindings.code('voiceMic')) { this.voice.toggleMic(); return true; }
     if (code === 'Escape' || code === bindings.code('pause')) {
       if (st === 'PAUSED') { this.pauseBack(); return true; }
@@ -303,7 +309,7 @@ export class Game {
       case 'briefing': if (st === 'HANGAR') { this.onAction('briefing'); return 'Mission briefing.'; } if (st === 'PAUSED') { this.onAction('briefing_review'); return 'Briefing review.'; } return 'Briefing is available from the hangar.';
       case 'continue': if (st === 'MAIN_MENU' && this.save.hasCampaign) { this.onAction('continue'); return 'Continuing the campaign.'; } return 'No saved campaign to continue.';
       case 'settings': if (st === 'MAIN_MENU' || st === 'PAUSED') { this.onAction('settings'); return 'Settings.'; } return 'Settings are in the menus.';
-      case 'controls': if (st === 'MAIN_MENU' || st === 'PAUSED') { this.onAction('controls'); return 'Controls.'; } return 'Controls are in the menus.';
+      case 'controls': this.commands.show(true); return 'Commands & shortcut keys.';
       case 'credits': if (st === 'MAIN_MENU') { this.onAction('credits'); return 'Credits.'; } return 'Credits are in the main menu.';
       case 'back': if (this.ui.overlayOpen) { this.onAction('close_overlay'); return 'Closed.'; } if (st === 'MAIN_MENU' || st === 'PILOT_SELECTION') { this.onAction('main_menu'); return 'Back.'; } return 'Nothing to close.';
       case 'interact': return 'There is nobody to interact with here.';
@@ -406,6 +412,7 @@ export class Game {
       case 'objectives': if (this.session) { this.ui.objectivesPanel(this.session.director.objectives, this.session.director.phase, this.session.director.hint(2)); this.pauseMenuShown = false; } break;
       case 'map': this.ui.mapPanel(); this.pauseMenuShown = false; break;
       case 'controls': this.ui.controls(this.fsm.state === 'PAUSED'); this.pauseMenuShown = false; break;
+      case 'commands': this.commands.show(true); break;
       case 'reset_keys': bindings.resetAll(); this.ui.controls(this.fsm.state === 'PAUSED'); this.ui.toast('Keys reset to defaults'); break;
       case 'briefing_review': this.ui.briefing(this.mission, this.route, true); this.pauseMenuShown = false; break;
       case 'close_overlay': if (st === 'PAUSED') { this.ui.pauseMenu(); this.pauseMenuShown = true; } else this.ui.closeOverlay(); break;

@@ -216,6 +216,9 @@ export class MissionDirector {
       s.lineup = true; this.setState('lineup', 'done'); this.setState('takeoff', 'active');
       h.say('lineup'); h.say(h.route === 'A_BOY_SU57' ? 'lineup_banter_A' : 'lineup_banter_B');
     }
+    if (!s.lineup && h.player.cfg.id === 'F35' && this.startupProgress >= 1 && !pm.onGround && pm.pos.y - FIELD_ELEV > 25) {   // STOVL vertical take-off: no runway needed
+      s.lineup = true; this.setState('lineup', 'done', 'Vertical take-off'); this.setState('takeoff', 'active');
+    }
     this.leaderRolling = s.lineup && pm.onGround && pm.vel.length() > 12;
     if (s.lineup && pm.onGround && pm.iasKt >= 135 && !s.rotateCall) { s.rotateCall = true; h.say('rotate'); }
     if (s.lineup && !pm.onGround && this.obj('takeoff')?.state === 'active') {

@@ -112,7 +112,7 @@ export class CameraRig {
     if (this.view === 'tail' || this.view === 'tactical' || this.view === 'target' || this.view === 'cinematic' || this.view === 'tower') {
       let desired: THREE.Vector3; let look = _t.copy(m.pos);
       _u.set(0, 1, 0).applyQuaternion(m.q);
-      if (this.view === 'tail') desired = new THREE.Vector3(0, 1.2, 15).applyQuaternion(m.q);
+      if (this.view === 'tail') desired = new THREE.Vector3(0, 1.8 + p.cfg.length * 0.06, p.cfg.length * 0.6 + 13).applyQuaternion(m.q);
       else if (this.view === 'tactical') desired = new THREE.Vector3(0, 520, 60);
       else if (this.view === 'cinematic') { this.cineA += dt * 0.12; desired = new THREE.Vector3(Math.cos(this.cineA) * 70, 4 + Math.sin(this.cineA * 1.7) * 12, Math.sin(this.cineA) * 70).applyQuaternion(this.tmpQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(-m.vel.x, -m.vel.z))); }
       else if (this.view === 'target') {

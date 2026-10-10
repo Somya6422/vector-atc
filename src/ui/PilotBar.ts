@@ -1,12 +1,12 @@
 import type { Cmd } from '../voice/CommandParser';
 
-export interface GuideButton { label: string; title: string; cmd: Cmd | { t: 'guide' } | { t: 'radial' }; hot?: boolean; on?: boolean }
+export interface GuideButton { label: string; title: string; cmd: Cmd | { t: 'guide' } | { t: 'radial' } | { t: 'help' }; hot?: boolean; on?: boolean }
 
 /** Action dial: the essential operations as large touch/mouse targets around a ring. */
 const DIAL: { label: string; cmd: Cmd }[] = [
   { label: 'START ENGINE', cmd: { t: 'start_engines' } }, { label: 'AUTO-TAXI', cmd: { t: 'taxi' } }, { label: 'AUTO-TAKEOFF', cmd: { t: 'autotakeoff' } },
   { label: 'FLARES', cmd: { t: 'flares' } }, { label: 'WINGMAN ENGAGE', cmd: { t: 'wing', cmd: 'engage' } }, { label: 'CAMERA', cmd: { t: 'camera', next: true } },
-  { label: 'AUTOLAND', cmd: { t: 'autoland' } }, { label: 'RECOVER', cmd: { t: 'recover' } },
+  { label: 'AUTOLAND', cmd: { t: 'autoland' } }, { label: 'RECOVER', cmd: { t: 'recover' } }, { label: 'ECM JAMMER', cmd: { t: 'ecm' } }, { label: 'HINT', cmd: { t: 'hint' } },
 ];
 const SQUAD: { label: string; cmd: Cmd }[] = [
   { label: 'COVER', cmd: { t: 'wing', cmd: 'cover' } }, { label: 'ENGAGE', cmd: { t: 'wing', cmd: 'engage' } },
@@ -29,6 +29,8 @@ export class PilotBar {
   onCommand?: (c: Cmd) => void;
   /** called when the dial opens (so pointer capture can be released for clicking) */
   onDialOpen?: () => void;
+  /** opens the commands & shortcuts sheet */
+  onHelp?: () => void;
 
   constructor(host: HTMLElement) {
     this.root = document.createElement('div'); this.root.id = 'pilotbar'; this.root.style.display = 'none';
@@ -95,7 +97,7 @@ export class PilotBar {
     const row = document.createElement('div'); row.className = 'pbrow';
     for (const b of buttons) {
       const el = document.createElement('button'); el.className = 'pbbtn' + (b.hot ? ' hot' : '') + (b.on ? ' on' : ''); el.textContent = b.label; el.title = b.title;
-      el.addEventListener('click', e => { e.stopPropagation(); (e.currentTarget as HTMLElement).blur(); const k = (b.cmd as { t: string }).t; if (k === 'guide') this.toggleGuide(); else if (k === 'radial') this.toggleDial(); else this.onCommand?.(b.cmd as Cmd); });
+      el.addEventListener('click', e => { e.stopPropagation(); (e.currentTarget as HTMLElement).blur(); const k = (b.cmd as { t: string }).t; if (k === 'guide') this.toggleGuide(); else if (k === 'radial') this.toggleDial(); else if (k === 'help') this.onHelp?.(); else this.onCommand?.(b.cmd as Cmd); });
       row.append(el);
     }
     this.bar.append(row);
