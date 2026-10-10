@@ -1,0 +1,10 @@
+{
+ "source": "AWS/Mapzen Terrain Tiles (terrarium, z11)",
+ "lat0": 42.4,
+ "lon0": 44.35,
+ "W": 500,
+ "H": 650,
+ "cell": 80,
+ "min": 1048.7060228624769,
+ "max": 5009.052440366927
+}
